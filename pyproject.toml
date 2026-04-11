@@ -1,0 +1,32 @@
+[project]
+name = "ashare-research-assistant"
+version = "0.1.0"
+description = "交互式 A 股投研 CLI Copilot"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "prompt-toolkit>=3.0",
+    "httpx>=0.27",
+    "tushare>=1.4",
+    "akshare>=1.14",
+    "anthropic>=0.40",
+    "python-dotenv>=1.0",
+    "ddgs>=9.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+]
+
+[project.scripts]
+ashare = "ashare_research_assistant.cli.main:app"
+
+[build-system]
+requires = ["uv_build>=0.11.2,<0.12.0"]
+build-backend = "uv_build"

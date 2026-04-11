@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>A股投研助手 · 系统架构图</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    padding: 40px 32px;
+    min-height: 100vh;
+  }
+  h1 {
+    text-align: center;
+    font-size: 20px;
+    font-weight: 600;
+    color: #f1f5f9;
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 36px;
+    letter-spacing: 0.08em;
+  }
+
+  .arch {
+    max-width: 1060px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  /* Layer wrapper */
+  .layer {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    position: relative;
+  }
+
+  .layer-label {
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #475569;
+    padding: 12px 8px;
+    min-width: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid #1e293b;
+  }
+
+  .layer-body {
+    flex: 1;
+    padding: 14px 16px;
+    border: 1px solid #1e293b;
+    border-top: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .layer:first-child .layer-body { border-top: 1px solid #1e293b; border-radius: 10px 10px 0 0; }
+  .layer:first-child .layer-label { border-radius: 10px 0 0 0; }
+  .layer:last-child .layer-body { border-radius: 0 0 10px 0; }
+  .layer:last-child .layer-label { border-radius: 0 0 0 10px; }
+
+  /* Color themes per layer */
+  .layer-interface  .layer-body { background: #0f172a; border-color: #1e3a5f; }
+  .layer-interface  .layer-label { background: #0d1f36; border-color: #1e3a5f; color: #3b82f6; }
+
+  .layer-orch       .layer-body { background: #130f22; border-color: #3b1f6e; }
+  .layer-orch       .layer-label { background: #100d1e; border-color: #3b1f6e; color: #a855f7; }
+
+  .layer-agent      .layer-body { background: #0f1f1a; border-color: #1a4a36; }
+  .layer-agent      .layer-label { background: #0c1b15; border-color: #1a4a36; color: #10b981; }
+
+  .layer-memory     .layer-body { background: #1a150a; border-color: #4a3010; }
+  .layer-memory     .layer-label { background: #160f06; border-color: #4a3010; color: #f59e0b; }
+
+  .layer-provider   .layer-body { background: #1a0f0f; border-color: #4a1a1a; }
+  .layer-provider   .layer-label { background: #150a0a; border-color: #4a1a1a; color: #ef4444; }
+
+  /* Boxes */
+  .box {
+    border-radius: 7px;
+    padding: 9px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    border: 1px solid transparent;
+    position: relative;
+  }
+  .box .name { font-weight: 600; font-size: 12px; white-space: nowrap; }
+  .box .desc { font-size: 10px; color: #94a3b8; white-space: nowrap; }
+
+  /* Color variants */
+  .blue   { background: #0c2d5c; border-color: #2563eb; color: #93c5fd; }
+  .blue   .name { color: #bfdbfe; }
+  .purple { background: #1e0f3c; border-color: #7c3aed; color: #c4b5fd; }
+  .purple .name { color: #ddd6fe; }
+  .green  { background: #062312; border-color: #059669; color: #6ee7b7; }
+  .green  .name { color: #a7f3d0; }
+  .teal   { background: #062320; border-color: #0d9488; color: #5eead4; }
+  .teal   .name { color: #99f6e4; }
+  .amber  { background: #1c0f00; border-color: #d97706; color: #fcd34d; }
+  .amber  .name { color: #fde68a; }
+  .red    { background: #1c0505; border-color: #dc2626; color: #fca5a5; }
+  .red    .name { color: #fecaca; }
+  .slate  { background: #1e293b; border-color: #334155; color: #94a3b8; }
+  .slate  .name { color: #cbd5e1; }
+  .orange { background: #1c0c00; border-color: #ea580c; color: #fdba74; }
+  .orange .name { color: #fed7aa; }
+  .pink   { background: #1c0619; border-color: #db2777; color: #f9a8d4; }
+  .pink   .name { color: #fbcfe8; }
+
+  /* Arrow between layers */
+  .arrow-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 28px;
+    position: relative;
+  }
+  .arrow-row::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom, #334155, #475569);
+  }
+  .arrow-label {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    font-size: 9px;
+    color: #64748b;
+    padding: 2px 8px;
+    z-index: 1;
+    letter-spacing: 0.06em;
+  }
+
+  /* Inline flow */
+  .flow-arrow {
+    color: #334155;
+    font-size: 18px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Pipeline row (within agent layer) */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: nowrap;
+    flex: 1;
+  }
+
+  /* State machine badges */
+  .stages {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .stage-badge {
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 20px;
+    border: 1px solid #334155;
+    color: #64748b;
+    background: #0f1117;
+  }
+
+  /* Section dividers inside a layer */
+  .divider {
+    width: 1px;
+    background: #1e293b;
+    align-self: stretch;
+    margin: 0 4px;
+  }
+
+  /* Legend */
+  .legend {
+    max-width: 1060px;
+    margin: 24px auto 0;
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: #64748b;
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    border: 1px solid;
+  }
+
+  /* Clarification Gate callout */
+  .gate {
+    border: 1px dashed #7c3aed;
+    border-radius: 6px;
+    padding: 5px 10px;
+    font-size: 10px;
+    color: #a78bfa;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: #0d0818;
+  }
+  .gate-icon { font-size: 13px; }
+
+  .session-stage-row {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    flex-wrap: wrap;
+    flex: 1;
+    justify-content: flex-end;
+  }
+  .session-stage-row .label {
+    font-size: 9px;
+    color: #475569;
+    margin-right: 2px;
+  }
+</style>
+</head>
+<body>
+
+<h1>A 股投研助手 · 系统架构</h1>
+<div class="subtitle">Multi-Agent Research Copilot · MVP v1</div>
+
+<div class="arch">
+
+  <!-- ① Interface Layer -->
+  <div class="layer layer-interface">
+    <div class="layer-label">Interface</div>
+    <div class="layer-body">
+      <div class="box blue">
+        <span class="name">CLI Session Runtime</span>
+        <span class="desc">session.py · 会话循环 & 状态驱动</span>
+      </div>
+      <div class="flow-arrow">›</div>
+      <div class="box blue">
+        <span class="name">Renderer</span>
+        <span class="desc">renderer.py · 观点卡 / 追问渲染</span>
+      </div>
+      <div class="flow-arrow">›</div>
+      <div class="box blue">
+        <span class="name">CLI Entry</span>
+        <span class="desc">main.py · 入口 & 配置加载</span>
+      </div>
+      <div class="divider"></div>
+      <div class="session-stage-row">
+        <span class="label">SessionStage →</span>
+        <span class="stage-badge">observing</span>
+        <span class="stage-badge">routing</span>
+        <span class="stage-badge">clarifying</span>
+        <span class="stage-badge">searching</span>
+        <span class="stage-badge">researching</span>
+        <span class="stage-badge">evaluating</span>
+        <span class="stage-badge">synthesizing</span>
+        <span class="stage-badge">completed</span>
+        <span class="stage-badge">degraded</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span class="arrow-label">SessionState · RouterResult</span></div>
+
+  <!-- ② Orchestration Layer -->
+  <div class="layer layer-orch">
+    <div class="layer-label">Orchestration</div>
+    <div class="layer-body">
+      <div class="box purple">
+        <span class="name">Intent Router</span>
+        <span class="desc">router.py · 意图识别 / 标的解析</span>
+      </div>
+      <div class="flow-arrow">›</div>
+      <div class="box purple">
+        <span class="name">Orchestrator</span>
+        <span class="desc">orchestrator.py · Observe→Think→Act 核心循环</span>
+      </div>
+      <div class="flow-arrow">›</div>
+      <div class="gate">
+        <span class="gate-icon">⋯</span>
+        <span><b>Clarification Gate</b><br>ClarificationEngine · 追问 / 标的消歧</span>
+      </div>
+      <div class="flow-arrow">›</div>
+      <div class="box slate">
+        <span class="name">单票分析 Pipeline</span>
+        <span class="desc">_run_single_stock_pipeline()</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span class="arrow-label">EvidenceBundle · StockResearchDraft</span></div>
+
+  <!-- ③ Agent Capability Layer -->
+  <div class="layer layer-agent">
+    <div class="layer-label">Agents</div>
+    <div class="layer-body">
+      <div class="pipeline">
+        <div class="box green">
+          <span class="name">① Search Agent</span>
+          <span class="desc">search.py</span>
+          <span class="desc">搜公告 / 新闻 / 背景</span>
+        </div>
+        <div class="flow-arrow">›</div>
+        <div class="box green">
+          <span class="name">② Stock Research</span>
+          <span class="desc">stock_research.py</span>
+          <span class="desc">主叙事 / 驱动 / 预期价位</span>
+        </div>
+        <div class="flow-arrow">›</div>
+        <div class="box teal">
+          <span class="name">③ Evaluator</span>
+          <span class="desc">evaluator.py</span>
+          <span class="desc">置信度 / 证据覆盖</span>
+        </div>
+        <div class="flow-arrow">›</div>
+        <div class="box teal">
+          <span class="name">④ Synthesis</span>
+          <span class="desc">synthesis.py</span>
+          <span class="desc">OpinionCard ×2</span>
+        </div>
+      </div>
+      <div class="divider"></div>
+      <div class="box slate" style="opacity:0.55">
+        <span class="name">Hotlist Agent</span>
+        <span class="desc">（规划中）</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span class="arrow-label">TraceEvent · WorkingMemory · UserMemoryProfile</span></div>
+
+  <!-- ④ Memory & Trace Layer -->
+  <div class="layer layer-memory">
+    <div class="layer-label">Memory</div>
+    <div class="layer-body">
+      <div class="box amber">
+        <span class="name">Session Working Memory</span>
+        <span class="desc">session.py model · 运行时状态</span>
+      </div>
+      <div class="flow-arrow">›</div>
+      <div class="box amber">
+        <span class="name">Trace Store</span>
+        <span class="desc">trace_store.py · 完整过程记录</span>
+      </div>
+      <div class="flow-arrow">›</div>
+      <div class="box amber">
+        <span class="name">User Memory Profile</span>
+        <span class="desc">profile_store.py · 长期偏好 / 关注</span>
+      </div>
+      <div class="flow-arrow">›</div>
+      <div class="box amber">
+        <span class="name">Price Target Engine</span>
+        <span class="desc">price_target_engine.py · 区间 & 锚定</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow-row"><span class="arrow-label">Provider Interface（base ABC）</span></div>
+
+  <!-- ⑤ Provider Layer -->
+  <div class="layer layer-provider">
+    <div class="layer-label">Providers</div>
+    <div class="layer-body">
+      <div class="box red">
+        <span class="name">Tushare</span>
+        <span class="desc">market_data_provider.py</span>
+        <span class="desc">行情 · 日线 · 因子 · Profile</span>
+      </div>
+      <div class="flow-arrow">·</div>
+      <div class="box orange">
+        <span class="name">AKShare</span>
+        <span class="desc">news_provider.py</span>
+        <span class="desc">财经新闻 · 舆情</span>
+      </div>
+      <div class="flow-arrow">·</div>
+      <div class="box pink">
+        <span class="name">巨潮 cninfo</span>
+        <span class="desc">announcement_provider.py</span>
+        <span class="desc">官方公告 · 披露</span>
+      </div>
+      <div class="flow-arrow">·</div>
+      <div class="box slate" style="opacity:0.5">
+        <span class="name">Hotlist Provider</span>
+        <span class="desc">（规划中）</span>
+      </div>
+      <div class="divider"></div>
+      <div class="box slate" style="font-size:10px; padding: 7px 12px;">
+        <span class="name" style="font-size:10px;">统一 Schema</span>
+        <span class="desc">StockProfile · PriceSnapshot · DailyBar</span>
+        <span class="desc">DailyFactor · AnnouncementItem · NewsItem</span>
+        <span class="desc">HotStockItem · SourceMeta · EvidenceItem</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#0c2d5c;border-color:#2563eb"></div>Interface / CLI</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1e0f3c;border-color:#7c3aed"></div>Orchestration</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#062312;border-color:#059669"></div>Agent Capability</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#062320;border-color:#0d9488"></div>Eval / Synthesis</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1c0f00;border-color:#d97706"></div>Memory & Trace</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1c0505;border-color:#dc2626"></div>Data Provider</div>
+  <div class="legend-item" style="color:#475569">▸ 数据流向（上到下）</div>
+</div>
+
+</body>
+</html>
