@@ -466,26 +466,41 @@ class ToolExecutor:
         return "\n".join(lines)
 
     def _get_hot_list(self, inp: dict) -> str:
-        if not self._hotlist:
-            return "热门榜单功能暂未启用"
         list_type = inp.get("list_type", "hot")
         limit = int(inp.get("limit", 20))
-        try:
-            if list_type == "limit_up":
-                items = self._hotlist.get_limit_up_pool()
-                items = items[:limit]
-            else:
-                items = self._hotlist.get_hot_stocks(top_n=limit)
-        except Exception as e:
-            return f"热门榜单获取失败：{e}"
-        if not items:
-            return "暂无榜单数据"
-        lines = [f"## 今日{list_type}榜（TOP {len(items)}）"]
-        for i, item in enumerate(items, 1):
-            pct = item.momentum_score
-            pct_str = f"{pct:+.2f}%" if pct is not None else ""
-            lines.append(f"{i:2d}. {item.name}（{item.symbol}）{pct_str}")
-        return "\n".join(lines)
+
+        # 优先：akshare 热榜
+        if self._hotlist:
+            try:
+                if list_type == "limit_up":
+                    items = self._hotlist.get_limit_up_pool()[:limit]
+                else:
+                    items = self._hotlist.get_hot_stocks(top_n=limit)
+                if items:
+                    lines = [f"## 今日{list_type}榜（TOP {len(items)}）"]
+                    for i, item in enumerate(items, 1):
+                        pct = item.momentum_score
+                        pct_str = f"{pct:+.2f}%" if pct is not None else ""
+                        lines.append(f"{i:2d}. {item.name}（{item.symbol}）{pct_str}")
+                    return "\n".join(lines)
+            except Exception as e:
+                logger.warning(f"akshare 热榜获取失败，降级到网络搜索: {e}")
+
+        # 降级：网络搜索
+        if self._web_search:
+            try:
+                query = "今日A股热门股票涨幅榜" if list_type == "limit_up" else "今日A股热门股票排行榜"
+                items = self._web_search.search_news(query, max_results=limit)
+                if items:
+                    lines = [f"## 今日{list_type}榜（网络搜索结果）"]
+                    for i, n in enumerate(items[:limit], 1):
+                        title = n.title[:40]
+                        lines.append(f"{i:2d}. {title}")
+                    return "\n".join(lines)
+            except Exception as e:
+                logger.warning(f"网络搜索降级也失败: {e}")
+
+        return "热门榜单功能暂未启用，请尝试直接查询具体股票代码"
 
     def _search_web(self, inp: dict) -> str:
         if not self._web_search:

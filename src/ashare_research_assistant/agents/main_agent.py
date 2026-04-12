@@ -336,7 +336,8 @@ class MainAgent:
             web_search=self._web_search,
         )
         self._executor = executor
-        self._resolved_cache = {}
+        self._resolved_cache: dict[str, StockIdentifier] = {}
+        self._failed_tools: set[str] = set()  # 记录失败的工具名
 
         user_input = state.user_input
         messages: list[dict] = [{"role": "user", "content": user_input}]
@@ -411,6 +412,15 @@ class MainAgent:
 
                 else:
                     result_text = executor.execute(block.name, block.input)
+                    # 检测工具是否失败（返回错误信息）
+                    is_failure = (
+                        result_text.startswith("工具执行失败")
+                        or "失败" in result_text
+                        and "暂未启用" not in result_text
+                        and "暂无" not in result_text
+                    )
+                    if is_failure:
+                        self._failed_tools.add(block.name)
                     state.trace.append(_trace(
                         state, "llm", f"tool:{block.name}",
                         result_text[:80].replace("\n", " "),
@@ -476,10 +486,7 @@ class MainAgent:
             except Exception as e:
                 logger.warning(f"大盘查询兜底失败: {e}")
 
-        logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}")
-        return self._degraded(state, f"超过最大迭代次数 {MAX_ITERATIONS}")
-
-        logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}")
+        logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}，失败工具：{self._failed_tools}")
         return self._degraded(state, f"超过最大迭代次数 {MAX_ITERATIONS}")
 
     # ── 工具处理 ──────────────────────────────────────────────────────────────
