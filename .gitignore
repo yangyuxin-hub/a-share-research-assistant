@@ -17,3 +17,4 @@ wheels/
 .agents/
 .local/
 skills-lock.json
+claude-api.md

@@ -44,9 +44,11 @@ cp .env.example .env
 编辑 `.env`：
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
+ASHARE_API_KEY=sk-ant-...
 TUSHARE_TOKEN=your_tushare_token
 ```
+
+> **注意**：项目故意不使用 `ANTHROPIC_API_KEY` 这个变量名。Claude Code CLI 会扫描当前目录的 `.env`，如果发现 `ANTHROPIC_API_KEY` 会切换为 API Key 模式并覆盖全局 OAuth 登录。
 
 完整配置项见下方[配置说明](#配置说明)。
 
@@ -81,7 +83,7 @@ uv run ashare chat
 
 | 变量 | 说明 | 默认值 | 必需 |
 |---|---|---|---|
-| `ANTHROPIC_API_KEY` | Claude API 密钥 | — | 必须 |
+| `ASHARE_API_KEY` | Claude API 密钥（避免与 Claude Code CLI 冲突，不用标准名） | — | 必须 |
 | `ANTHROPIC_BASE_URL` | 自定义 API 端点（中转） | — | 可选 |
 | `ANTHROPIC_MODEL` | 使用的模型 | `claude-sonnet-4-6` | 可选 |
 | `TUSHARE_TOKEN` | Tushare 行情数据 token | — | 推荐 |
