@@ -121,6 +121,19 @@ def print_clarification(question: ClarificationQuestion) -> None:
     console.print()
 
 
+def print_direct_answer(text: str) -> None:
+    if not text:
+        return
+    console.print()
+    console.print(Panel(
+        text.strip(),
+        title="[cyan]回答[/cyan]",
+        border_style="cyan",
+        padding=(1, 2),
+    ))
+    console.print()
+
+
 def print_degraded(state: SessionState) -> None:
     console.print(Panel(
         f"[yellow]当前意图暂不支持完整分析。\n"

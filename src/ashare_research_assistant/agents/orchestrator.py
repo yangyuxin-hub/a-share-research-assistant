@@ -97,6 +97,23 @@ class Orchestrator:
         intent = router_result.intent_type
         entities = router_result.resolved_entities
 
+        # ── 不需要工具、直接回答的场景 ──────────────────────────────────────────
+        # 纯概念/知识问题，用 LLM 知识直接回答，不进 agentic loop
+        if intent == "knowledge_question":
+            return self._direct_answer(state, router_result)
+
+        # 通用市场询问（无具体股票/主题），直接回答
+        if intent == "general_market_question" and not entities and not router_result.theme_keywords:
+            return self._direct_answer(state, router_result)
+
+        # 主题探索 + 无候选标的 → 可以先搜索网络信息，无需强求股票
+        if intent == "theme_or_topic_exploration" and not entities:
+            # 降级为市场概览 Skill 搜索网络即可
+            skill = select_skill("general_market_question", user_input=state.user_input)
+            state = state.model_copy(update={"stage": "researching"})
+            state.trace.append(_trace(state, "orchestrator", "skill_selected", skill.name))
+            return self._run_agentic_loop(state, skill, [])
+
         # 主题探索 + 有候选 → 让用户选一只
         if intent == "theme_or_topic_exploration":
             theme = (
@@ -456,3 +473,46 @@ class Orchestrator:
         state.trace.append(_trace(state, "orchestrator", "degraded", reason))
         self._trace_store.append_many(state.trace)
         return state
+
+    # ── 直接回答（无工具） ──────────────────────────────────────────────────────
+
+    def _direct_answer(self, state: SessionState, router_result: RouterResult) -> SessionState:
+        """纯知识/概念问答，不调用任何工具，LLM 直接回答。"""
+        answer_prompt = (
+            "你是一个简洁的 A 股投研助手。用户问的是概念/知识问题，"
+            "请用简洁准确的语言直接回答，不需要调用任何工具。\n\n"
+            f"用户问题：{state.user_input}\n\n"
+            "回答："
+        )
+
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                max_tokens=512,
+                system=(
+                    "你是 A 股投研助手，擅长用简洁专业的语言解释金融概念和投研知识。\n"
+                    "风格：准确、克制、有例子。不夸大，不废话。"
+                ),
+                messages=[{"role": "user", "content": answer_prompt}],
+                # 注意：这里不传 tools 参数，LLM 只能说话，无法调用工具
+            )
+        except Exception as e:
+            logger.error(f"_direct_answer LLM 调用失败: {e}")
+            return self._degraded(state, f"回答生成失败：{e}")
+
+        text = "".join(
+            block.text for block in response.content
+            if hasattr(block, "text")
+        )
+
+        state = state.model_copy(update={
+            "stage": "answered",
+            "direct_answer": text,
+            "intent": router_result.intent_type,
+            "intent_confidence": router_result.confidence,
+        })
+        state.trace.append(_trace(state, "orchestrator", "direct_answer",
+                                  text[:60].replace("\n", " ")))
+        self._trace_store.append_many(state.trace)
+        return state
+

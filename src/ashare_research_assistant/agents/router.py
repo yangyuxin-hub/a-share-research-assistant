@@ -57,6 +57,7 @@ _TOOL_COMMIT_INTENT = {
                     "hot_candidate_discovery",
                     "theme_or_topic_exploration",
                     "general_market_question",
+                    "knowledge_question",
                     "clarification_required",
                 ],
                 "description": "意图类型",
@@ -105,7 +106,8 @@ _SYSTEM_PROMPT = """你是 A 股投研助手的意图路由模块。
 - stock_compare_or_followup：比较多只股票，或在对话中追问
 - hot_candidate_discovery：寻找热门/强势候选股
 - theme_or_topic_exploration：探索板块/主题（AI、新能源、医药等）
-- general_market_question：大盘行情等普通市场问题
+- general_market_question：大盘行情等需要实时数据的市场问题
+- knowledge_question：纯概念、知识、术语解释，不需要实时数据，例如"PE是什么意思""MACD金叉是什么""ROE怎么算"
 - clarification_required：输入极度模糊，无法判断
 
 ## 何时 clarification_needed=true

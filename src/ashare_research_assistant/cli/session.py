@@ -145,6 +145,13 @@ class CLISession:
         elif stage == "degraded":
             renderer.print_degraded(self._state)
 
+        elif stage == "answered":
+            renderer.print_direct_answer(self._state.direct_answer or "")
+
+        elif stage == "answered":
+            if self._state.direct_answer:
+                renderer.print_direct_answer(self._state.direct_answer)
+
     def _handle_expand(self) -> None:
         if not self._state.working_memory.active_task:
             renderer.console.print("[dim]暂无可展开的分析结果。[/dim]")

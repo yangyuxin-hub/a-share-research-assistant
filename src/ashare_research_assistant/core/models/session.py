@@ -17,6 +17,7 @@ IntentType = Literal[
     "hot_candidate_discovery",
     "theme_or_topic_exploration",
     "general_market_question",
+    "knowledge_question",     # 纯知识问题，不需要实时数据，直接回答
     "clarification_required",
 ]
 
@@ -49,6 +50,7 @@ class SessionState(BaseModel):
     research_draft: Optional[StockResearchDraft] = None
     evaluation: Optional[EvaluationResult] = None
     output_draft: Optional[OpinionCard] = None
+    direct_answer: Optional[str] = None  # 纯知识问答的原始回复文本
     working_memory: WorkingMemory = Field(default_factory=WorkingMemory)
     user_memory_snapshot: Optional[UserMemoryProfile] = None
     trace: list[TraceEvent] = []
