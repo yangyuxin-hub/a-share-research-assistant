@@ -13,13 +13,13 @@ from prompt_toolkit.styles import Style
 
 from ashare_research_assistant.config.settings import settings
 from ashare_research_assistant.core.models import ExpandedOpinionCard, SessionState
-from ashare_research_assistant.agents.router import RouterAgent
 from ashare_research_assistant.agents.orchestrator import Orchestrator
 from ashare_research_assistant.memory.profile_store import ProfileStore
 from ashare_research_assistant.providers.base.market_data import MarketDataProvider
 from ashare_research_assistant.providers.tushare import TushareMarketDataProvider
 from ashare_research_assistant.providers.cninfo import CninfoAnnouncementProvider
 from ashare_research_assistant.providers.akshare import AKShareNewsProvider
+from ashare_research_assistant.providers.akshare.hotlist_provider import AKShareHotlistProvider
 from ashare_research_assistant.providers.web_search_provider import WebSearchProvider
 from ashare_research_assistant.services.clarification_engine import ClarificationEngine
 from ashare_research_assistant.services.trace_store import TraceStore
@@ -60,6 +60,7 @@ class CLISession:
         self._announcement = CninfoAnnouncementProvider(token=settings.tushare_token or None)
         self._news = AKShareNewsProvider()
         self._web_search = WebSearchProvider()
+        self._hotlist = AKShareHotlistProvider()
 
         # Services
         self._trace_store = TraceStore(path=settings.trace_store_path)
@@ -67,10 +68,6 @@ class CLISession:
         self._clarification_engine = ClarificationEngine()
 
         # Agents
-        self._router = RouterAgent(
-            market_data_provider=self._market,
-            anthropic_client=self._anthropic,
-        )
         self._orchestrator = Orchestrator(
             market_data_provider=self._market,
             announcement_provider=self._announcement,
@@ -79,6 +76,7 @@ class CLISession:
             clarification_engine=self._clarification_engine,
             trace_store=self._trace_store,
             web_search=self._web_search,
+            hotlist_provider=self._hotlist,
         )
 
         # 会话状态
@@ -111,8 +109,25 @@ class CLISession:
 
             self._handle_input(user_input)
 
+    def _make_progress_cb(self):
+        """构造展示工具调用过程的回调（类似 Claude Code 的步骤展示）。"""
+        _RESULT_SUFFIX = "_result"
+
+        def cb(tool_name: str, brief: str) -> None:
+            if tool_name.endswith(_RESULT_SUFFIX):
+                # 工具结果摘要（只在单工具时触发）
+                src = tool_name[: -len(_RESULT_SUFFIX)]
+                renderer.print_tool_result(src, brief)
+            elif tool_name == "resolve_stock_result":
+                renderer.print_tool_result("resolve_stock", brief)
+            else:
+                renderer.print_tool_call(tool_name, brief)
+
+        return cb
+
     def _handle_input(self, user_input: str) -> None:
         self._state = self._state.new_turn(user_input)
+        progress_cb = self._make_progress_cb()
 
         # 如果处于 clarifying 状态，直接处理追问回答
         if self._state.clarification.status == "pending":
@@ -121,11 +136,8 @@ class CLISession:
                 self._state, user_input
             )
         else:
-            renderer.print_status("正在分析意图...")
-            router_result = self._router.route(user_input)
-
-            renderer.print_status(f"意图：{router_result.intent_type}（置信 {router_result.confidence:.0%}）")
-            self._state = self._orchestrator.run(self._state, router_result)
+            renderer.print_status("正在分析...")
+            self._state = self._orchestrator.run(self._state, progress_cb=progress_cb)
 
         self._render_state()
 
@@ -147,10 +159,6 @@ class CLISession:
 
         elif stage == "answered":
             renderer.print_direct_answer(self._state.direct_answer or "")
-
-        elif stage == "answered":
-            if self._state.direct_answer:
-                renderer.print_direct_answer(self._state.direct_answer)
 
     def _handle_expand(self) -> None:
         if not self._state.working_memory.active_task:

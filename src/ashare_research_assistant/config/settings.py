@@ -13,9 +13,9 @@ class Settings(BaseSettings):
     # LLM 提供商选择："anthropic" 或 "codex"
     llm_provider: str = "anthropic"
 
-    # Anthropic（故意不叫 ANTHROPIC_API_KEY，避免 Claude Code 扫到 .env 后切换到 API Key 模式覆盖 OAuth）
-    anthropic_api_key: str = Field(default="", validation_alias="ASHARE_API_KEY")
-    anthropic_base_url: str = ""
+    # Anthropic
+    anthropic_api_key: str = Field(default="", validation_alias="CLAUDE_API_KEY")
+    anthropic_base_url: str = Field(default="", validation_alias="CLAUDE_BASE_URL")
     anthropic_model: str = "claude-sonnet-4-6"
 
     # ChatGPT Codex（通过 ChatGPT Plus/Pro OAuth 订阅使用）

@@ -12,7 +12,7 @@
 import json
 import logging
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 import anthropic
 
@@ -101,13 +101,17 @@ _SYSTEM_PROMPT = """你是 A 股投研助手的意图路由模块。
 3. 根据查询结果判断：是否有歧义？是否需要追问？
 4. 调用 commit_intent 提交最终判断
 
+## 速度规则
+- 如果用户输入的是 6 位股票代码（如 600519），可以**同时调用 resolve_stock 和 commit_intent**，无需等待 resolve_stock 结果再决定意图。
+- 明确的股票分析请求，直接在一次响应中同时发起两个工具调用。
+
 ## 意图类型
 - single_stock_analysis：用户明确要分析某只股票（resolve_stock 后确认唯一）
 - stock_compare_or_followup：比较多只股票，或在对话中追问
 - hot_candidate_discovery：寻找热门/强势候选股
 - theme_or_topic_exploration：探索板块/主题（AI、新能源、医药等）
 - general_market_question：大盘行情等需要实时数据的市场问题
-- knowledge_question：纯概念、知识、术语解释，不需要实时数据，例如"PE是什么意思""MACD金叉是什么""ROE怎么算"
+- knowledge_question：纯概念、知识、术语解释、问候、闲聊、询问助手身份能力，不需要实时数据，例如"PE是什么意思""你好""你能做什么""MACD金叉是什么"
 - clarification_required：输入极度模糊，无法判断
 
 ## 何时 clarification_needed=true
@@ -139,6 +143,7 @@ class RouterAgent:
         self,
         user_input: str,
         session_context: Optional[str] = None,
+        progress_cb: Optional[Callable[[str, str], None]] = None,
     ) -> RouterResult:
         """Agentic Loop 主入口。
 
@@ -162,6 +167,7 @@ class RouterAgent:
                     max_tokens=1024,
                     system=_SYSTEM_PROMPT,
                     tools=_TOOLS,
+                    tool_choice={"type": "any"},
                     messages=messages,
                 )
             except Exception as e:
@@ -189,7 +195,19 @@ class RouterAgent:
 
             for block in tool_use_blocks:
                 if block.name == "resolve_stock":
+                    query = block.input.get("query", "")
+                    if progress_cb:
+                        progress_cb("resolve_stock", query)
                     result_text = self._handle_resolve_stock(block.input, resolved_cache)
+                    if progress_cb:
+                        # 简短摘要：找到几只
+                        try:
+                            import json as _json
+                            hits = _json.loads(result_text)
+                            brief = "、".join(f"{h['name']}({h['symbol']})" for h in hits[:3]) if isinstance(hits, list) else result_text[:60]
+                        except Exception:
+                            brief = result_text[:60]
+                        progress_cb("resolve_stock_result", brief)
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -199,6 +217,12 @@ class RouterAgent:
                 elif block.name == "commit_intent":
                     # commit_intent 不需要返回内容，直接提取结果
                     commit_result = block.input
+                    if progress_cb:
+                        intent = commit_result.get("intent_type", "?")
+                        conf = commit_result.get("confidence", 0)
+                        symbols = commit_result.get("resolved_symbols", [])
+                        sym_str = f" [{', '.join(symbols)}]" if symbols else ""
+                        progress_cb("commit_intent", f"{intent}{sym_str}  置信 {conf:.0%}")
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
@@ -303,17 +327,38 @@ class RouterAgent:
     # ── 降级规则 ──────────────────────────────────────────────────────────────
 
     def _fallback_route(self, user_input: str) -> RouterResult:
-        """LLM 失败或超限时的规则降级：正则匹配 6 位 A 股代码。"""
+        """LLM 失败或超限时的规则降级：先匹配 6 位代码，再尝试 resolve_stock 全文搜索。"""
+        # 1. 精确匹配 6 位 A 股代码
         code_pattern = re.compile(r"\b[036]\d{5}\b")
         codes = code_pattern.findall(user_input)
+        resolved: list[StockIdentifier] = []
+        seen: set[str] = set()
+
         if codes:
-            resolved: list[StockIdentifier] = []
-            seen: set[str] = set()
             for code in codes:
                 for stock in self._provider.resolve_stock(code):
                     if stock.symbol not in seen:
                         seen.add(stock.symbol)
                         resolved.append(stock)
+
+        # 2. 没有代码时，尝试把整段输入作为股票名称查询
+        if not resolved:
+            candidates = self._provider.resolve_stock(user_input.strip())
+            if not candidates:
+                # 提取 2-5 字中文词片段再试
+                cn_words = re.findall(r'[\u4e00-\u9fff]{2,5}', user_input)
+                for word in cn_words:
+                    hits = self._provider.resolve_stock(word)
+                    for s in hits:
+                        if s.symbol not in seen:
+                            seen.add(s.symbol)
+                            candidates.append(s)
+            for s in candidates:
+                if s.symbol not in seen:
+                    seen.add(s.symbol)
+                    resolved.append(s)
+
+        if resolved:
             return RouterResult(
                 intent_type="single_stock_analysis",
                 resolved_entities=resolved,

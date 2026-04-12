@@ -17,7 +17,7 @@ IntentType = Literal[
     "hot_candidate_discovery",
     "theme_or_topic_exploration",
     "general_market_question",
-    "knowledge_question",     # 纯知识问题，不需要实时数据，直接回答
+    "knowledge_question",     # 纯知识问题、问候、身份询问，直接回答
     "clarification_required",
 ]
 

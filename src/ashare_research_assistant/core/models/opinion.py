@@ -19,7 +19,7 @@ class OpinionCard(BaseModel):
     stance_label: Literal["看多", "中性", "看空"]
     confidence_label: Literal["低", "中", "高"]
     one_liner: str
-    current_price: float
+    current_price: Optional[float] = None
     expected_price_text: str
     horizon_text: str
     market_narrative: str

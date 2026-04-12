@@ -154,32 +154,6 @@ TOOL_GET_HOT_LIST = {
 TOOL_WEB_SEARCH = {
     "name": "search_web",
     "description": (
-        "搜索网络获取实时市场信息。适用场景：热点事件对股市的影响（如特朗普关税政策）、"
-        "板块动态、宏观政策解读、实时新闻。当用户询问的事件不在数据库中时应优先使用此工具。"
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": (
-                    "搜索关键词，建议包含事件和A股关键词。"
-                    "示例：「特朗普关税 A股影响」「AI算力板块最新动态」"
-                ),
-            },
-            "max_results": {
-                "type": "integer",
-                "description": "最多返回新闻条数，默认 6",
-                "default": 6,
-            },
-        },
-        "required": ["query"],
-    },
-}
-
-TOOL_WEB_SEARCH = {
-    "name": "search_web",
-    "description": (
         "搜索网络获取实时市场信息。用于：热点事件影响、板块动态、宏观政策、实时新闻。"
         "当用户询问的主题无法通过结构化数据回答时（如「特朗普关税影响」「AI板块最新动态」），"
         "应优先调用此工具获取实时信息。"
@@ -439,8 +413,8 @@ class ToolExecutor:
             lines.append(f"PB：{lf.pb:.2f}")
         if lf.total_market_value:
             lines.append(f"总市值：{lf.total_market_value/1e8:.1f} 亿")
-        if lf.circ_market_value:
-            lines.append(f"流通市值：{lf.circ_market_value/1e8:.1f} 亿")
+        if lf.float_market_value:
+            lines.append(f"流通市值：{lf.float_market_value/1e8:.1f} 亿")
         if lf.turnover_rate:
             lines.append(f"换手率：{lf.turnover_rate:.2f}%")
         if lf.volume_ratio:
@@ -497,38 +471,20 @@ class ToolExecutor:
         list_type = inp.get("list_type", "hot")
         limit = int(inp.get("limit", 20))
         try:
-            items = self._hotlist.get_hot_stocks(list_type=list_type, limit=limit)
+            if list_type == "limit_up":
+                items = self._hotlist.get_limit_up_pool()
+                items = items[:limit]
+            else:
+                items = self._hotlist.get_hot_stocks(top_n=limit)
         except Exception as e:
             return f"热门榜单获取失败：{e}"
         if not items:
             return "暂无榜单数据"
         lines = [f"## 今日{list_type}榜（TOP {len(items)}）"]
-        for i, item in enumerate(items[:limit], 1):
-            pct = f"{item.pct_change:+.2f}%" if item.pct_change is not None else ""
-            lines.append(f"{i:2d}. {item.name}（{item.symbol}）{pct}  {item.reason or ''}")
-        return "\n".join(lines)
-
-    def _search_web(self, inp: dict) -> str:
-        if not self._web_search:
-            return "网络搜索功能暂未启用"
-        query = inp.get("query", "")
-        max_results = int(inp.get("max_results", 6))
-        if not query:
-            return "请提供搜索关键词"
-        try:
-            items = self._web_search.search_news(query, max_results=max_results)
-        except Exception as e:
-            logger.warning(f"网络搜索失败 [{query}]: {e}")
-            return f"网络搜索失败：{e}"
-        if not items:
-            return f"未找到「{query}」相关实时信息"
-        lines = [f"## 网络搜索：「{query}」（{len(items)} 条）"]
-        for n in items:
-            outlet = n.outlet or ""
-            date = n.publish_time[:10] if n.publish_time else ""
-            lines.append(f"- [{date}][{outlet}] {n.title}")
-            if n.summary and n.summary != n.title:
-                lines.append(f"  {n.summary[:120]}")
+        for i, item in enumerate(items, 1):
+            pct = item.momentum_score
+            pct_str = f"{pct:+.2f}%" if pct is not None else ""
+            lines.append(f"{i:2d}. {item.name}（{item.symbol}）{pct_str}")
         return "\n".join(lines)
 
     def _search_web(self, inp: dict) -> str:

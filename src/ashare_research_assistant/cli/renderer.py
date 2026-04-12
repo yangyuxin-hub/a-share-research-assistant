@@ -32,8 +32,41 @@ _CONF_COLOR = {
 }
 
 
+_TOOL_LABEL: dict[str, str] = {
+    "resolve_stock":       "解析股票",
+    "commit_intent":       "确认意图",
+    "get_stock_profile":   "基本面",
+    "get_price_snapshot":  "价格快照",
+    "get_daily_bars":      "历史K线",
+    "get_financial_factors": "财务因子",
+    "search_announcements": "公告搜索",
+    "search_news":         "新闻搜索",
+    "search_web":          "网络搜索",
+    "get_hot_list":        "热门榜单",
+    "commit_opinion":      "提交结论",
+}
+
+
 def print_status(message: str) -> None:
     console.print(f"[dim]... {message}[/dim]")
+
+
+def print_thinking(message: str) -> None:
+    """显示 LLM 内部执行步骤（工具调用、意图路由等），类似 Claude Code 的过程展示。"""
+    console.print(f"[dim]    {message}[/dim]")
+
+
+def print_tool_call(tool_name: str, args_brief: str = "") -> None:
+    """显示单次工具调用。"""
+    label = _TOOL_LABEL.get(tool_name, tool_name)
+    suffix = f"  {args_brief}" if args_brief else ""
+    console.print(f"[dim cyan]  -> {label}[/dim cyan][dim]{suffix}[/dim]")
+
+
+def print_tool_result(tool_name: str, result_brief: str = "") -> None:
+    """显示工具返回摘要。"""
+    label = _TOOL_LABEL.get(tool_name, tool_name)
+    console.print(f"[dim]     {label}: {result_brief}[/dim]")
 
 
 def print_error(message: str) -> None:
@@ -56,7 +89,8 @@ def print_opinion_card(card: OpinionCard) -> None:
     table.add_column()
 
     table.add_row("判断", f"[bold]{card.one_liner}[/bold]")
-    table.add_row("当前价", f"{card.current_price:.2f} 元")
+    price_str = f"{card.current_price:.2f} 元" if card.current_price is not None else "暂无"
+    table.add_row("当前价", price_str)
     table.add_row("预期价位", card.expected_price_text)
     table.add_row("判断期限", card.horizon_text)
     table.add_row("", "")

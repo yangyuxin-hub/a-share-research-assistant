@@ -6,6 +6,7 @@ import uuid
 SessionStage = Literal[
     "observing",
     "routing",
+    "running",
     "clarifying",
     "researching",
     "searching",
@@ -13,16 +14,19 @@ SessionStage = Literal[
     "synthesizing",
     "completed",
     "degraded",
+    "answered",
 ]
 
 TraceActor = Literal[
     "router",
     "orchestrator",
+    "main_agent",
     "search_agent",
     "research_agent",
     "hotlist_agent",
     "synthesis_agent",
     "evaluator",
+    "llm",
 ]
 
 

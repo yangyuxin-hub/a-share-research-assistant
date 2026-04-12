@@ -6,7 +6,7 @@ class AnalysisWindow(BaseModel):
     mode: Literal["auto", "manual"] = "auto"
     start_date: Optional[str] = None
     end_date: Optional[str] = None
-    horizon_label: Optional[Literal["1-3d", "1w", "2w", "custom"]] = None
+    horizon_label: Optional[Literal["1-3d", "1w", "2w", "1m", "custom"]] = None
     rationale: Optional[str] = None
 
 

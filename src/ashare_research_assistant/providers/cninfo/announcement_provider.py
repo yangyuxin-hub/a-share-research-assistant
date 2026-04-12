@@ -69,33 +69,52 @@ class CninfoAnnouncementProvider(AnnouncementProvider):
         start = start_date.replace("-", "")
         end = end_date.replace("-", "")
 
-        try:
-            df = self._pro.anns(
-                ts_code=ts_code,
-                start_date=start,
-                end_date=end,
-                fields="ts_code,ann_date,title,ann_type,url",
-            )
-            if df is None or df.empty:
-                return []
+        # 依次尝试已知的 Tushare 公告接口名
+        _ANN_APIS = [
+            ("stk_notices", "ts_code,ann_date,title,notice_type", "notice_type"),
+            ("anns",        "ts_code,ann_date,title,ann_type",    "ann_type"),
+            ("anns_d",      None,                                  None),
+        ]
+        df = None
+        for api_name, fields_str, type_col in _ANN_APIS:
+            try:
+                api_fn = getattr(self._pro, api_name)
+                kwargs: dict = {"ts_code": ts_code, "start_date": start, "end_date": end}
+                if fields_str:
+                    kwargs["fields"] = fields_str
+                df = api_fn(**kwargs)
+                if df is not None and not df.empty:
+                    break
+                df = None
+            except Exception:
+                df = None
+                continue
 
+        if df is None or df.empty:
+            logger.warning(f"CninfoAnnouncementProvider: {symbol} 无公告数据（Tushare 接口不可用或无数据）")
+            return []
+
+        try:
             items = []
-            for _, row in df.sort_values("ann_date", ascending=False).head(max_results).iterrows():
+            date_col = "ann_date" if "ann_date" in df.columns else df.columns[0]
+            cat_col = next((c for c in ("notice_type", "ann_type") if c in df.columns), None)
+            for _, row in df.sort_values(date_col, ascending=False).head(max_results).iterrows():
                 title = str(row.get("title", ""))
+                if not title:
+                    continue
                 if keywords and not any(kw in title for kw in keywords):
                     continue
                 items.append(AnnouncementItem(
-                    id=f"{ts_code}_{row.get('ann_date', '')}_{len(items)}",
+                    id=f"{ts_code}_{row.get(date_col, '')}_{len(items)}",
                     symbol=symbol,
                     title=title,
-                    publish_time=str(row.get("ann_date", "")),
-                    category=str(row.get("ann_type", "")) or None,
-                    url=str(row.get("url", "")) or None,
+                    publish_time=str(row.get(date_col, "")),
+                    category=str(row.get(cat_col, "")) if cat_col else None,
                     source=_source(),
                 ))
             return items
         except Exception as e:
-            logger.error(f"CninfoAnnouncementProvider.search_announcements 失败 [{symbol}]: {e}")
+            logger.warning(f"CninfoAnnouncementProvider.search_announcements 解析失败 [{symbol}]: {e}")
             return []
 
     def get_announcement_detail(self, announcement_id: str) -> Optional[AnnouncementDocument]:
