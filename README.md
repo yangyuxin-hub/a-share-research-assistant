@@ -44,7 +44,7 @@ cp .env.example .env
 编辑 `.env`：
 
 ```env
-ASHARE_API_KEY=sk-ant-...
+CLAUDE_API_KEY=sk-ant-...
 TUSHARE_TOKEN=your_tushare_token
 ```
 
@@ -83,7 +83,7 @@ uv run ashare chat
 
 | 变量 | 说明 | 默认值 | 必需 |
 |---|---|---|---|
-| `ASHARE_API_KEY` | Claude API 密钥（避免与 Claude Code CLI 冲突，不用标准名） | — | 必须 |
+| `CLAUDE_API_KEY` | Claude API 密钥（避免与 Claude Code CLI 冲突，不用标准名） | — | 必须 |
 | `ANTHROPIC_BASE_URL` | 自定义 API 端点（中转） | — | 可选 |
 | `ANTHROPIC_MODEL` | 使用的模型 | `claude-sonnet-4-6` | 可选 |
 | `TUSHARE_TOKEN` | Tushare 行情数据 token | — | 推荐 |
