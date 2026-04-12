@@ -8,11 +8,11 @@
 
 ## 功能特性
 
-- **意图路由**：自动识别单票分析、主题探索、热股发现等意图，标的歧义时主动追问而非盲目分析
-- **多工具 Agentic Loop**：LLM 自主决定调用数据工具的顺序和深度，支持公告、新闻、行情、估值等多维度数据
-- **双层观点卡**：极简卡展示核心判断（方向 + 价位 + 期限 + 置信度），完整卡包含证据链、分歧点、后续观察项
-- **持续会话**：多轮对话，支持追问、比较、策略调整
-- **本地 Trace**：完整分析过程记录为 JSONL，可审计可复盘
+- **统一 MainAgent**：意图路由与数据分析合为一体，LLM 自主决定调用哪些工具，节省一次模型调用，延迟降低约 30%
+- **12 个工具全挂载**：resolve_stock、行情、财务因子、公告、新闻、热门榜单、网络搜索，全部交给模型自主决策
+- **歧义主动追问**：多候选或意图模糊时调用 commit_clarification，而非盲目分析
+- **双层观点卡**：极简卡展示方向+价位+置信度，展开卡含证据链、多空分歧、观察项
+- **全链路 Trace**：分析过程 JSONL 记录，支持审计复盘
 
 ---
 
@@ -45,6 +45,7 @@ cp .env.example .env
 
 ```env
 CLAUDE_API_KEY=sk-ant-...
+CLAUDE_BASE_URL=https://your-proxy.com
 TUSHARE_TOKEN=your_tushare_token
 ```
 
@@ -84,7 +85,7 @@ uv run ashare chat
 | 变量 | 说明 | 默认值 | 必需 |
 |---|---|---|---|
 | `CLAUDE_API_KEY` | Claude API 密钥（避免与 Claude Code CLI 冲突，不用标准名） | — | 必须 |
-| `ANTHROPIC_BASE_URL` | 自定义 API 端点（中转） | — | 可选 |
+| `CLAUDE_BASE_URL` | 自定义 API 端点（中转） | — | 可选 |
 | `ANTHROPIC_MODEL` | 使用的模型 | `claude-sonnet-4-6` | 可选 |
 | `TUSHARE_TOKEN` | Tushare 行情数据 token | — | 推荐 |
 | `USE_AKSHARE_HOTLIST` | 启用 AKShare 热股发现 | `true` | 可选 |
@@ -100,27 +101,28 @@ uv run ashare chat
 ```
 用户输入
   ↓
-[Intent Router]  ← agentic loop，含 resolve_stock / commit_intent 工具
-  ↓
-[Orchestrator]   ← 判断是否追问，选择技能，委托执行
-  ↓
-[LLM Agentic Loop]  ← 自主调用数据工具，迭代探索
-  │  get_stock_profile / get_price_snapshot / get_daily_bars
-  │  get_financial_factors / search_announcements / search_news
-  └─ commit_opinion  ← 提交最终观点
+[MainAgent]  ← 意图路由 + Agentic Loop 合一，12个工具全挂，LLM自主决策
+  │  resolve_stock / get_stock_profile / get_price_snapshot
+  │  get_daily_bars / get_financial_factors
+  │  search_announcements / search_news
+  │  get_hot_list / search_web
+  └─ commit_opinion / commit_answer / commit_clarification
   ↓
 [Trace Store]    ← 记录全过程
   ↓
 [CLI Renderer]   ← 双层观点卡渲染
 ```
 
-### 技能（Skill）
+### 意图决策
 
-| 技能 | 触发场景 | 迭代轮次 |
-|---|---|---|
-| `single_stock_deep_dive` | 单票深度研究 | 最多 12 轮 |
-| `quick_price_check` | 快速价格查询 | 最多 5 轮 |
-| `general_market_overview` | 市场概览 / 热股发现 | — |
+MainAgent 根据用户输入自主判断：
+
+| 场景 | 工具调用路径 |
+|------|-------------|
+| 股票名称/代码 | resolve_stock → 数据工具 → commit_opinion |
+| 大盘/宏观/事件 | search_web / get_hot_list → commit_opinion |
+| 概念/术语/问候 | commit_answer（直接回答） |
+| 多候选/意图模糊 | commit_clarification（追问） |
 
 ### 数据源
 
