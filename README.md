@@ -122,7 +122,7 @@
 
 ### 手机端（Cloudflare Tunnel 公网访问）
 
-![手机端](docs/screenshots/mobile.png)
+![手机端](docs/screenshots/mobile.jpg)
 
 ---
 
