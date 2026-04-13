@@ -88,6 +88,77 @@ cloudflared tunnel --url http://localhost:7860 --protocol http2
 
 ---
 
+## 系统架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      入口层 Entry                        │
+│          CLI（Typer + Rich + prompt-toolkit）             │
+│          Web（Gradio，支持手机端 / Cloudflare Tunnel）    │
+└───────────────────────┬─────────────────────────────────┘
+                        │ SessionState（Pydantic）
+┌───────────────────────▼─────────────────────────────────┐
+│                   编排层 Orchestrator                     │
+│   CLISession / WebApp → Orchestrator → MainAgent         │
+│   管理多轮对话历史、追问状态（ClarificationEngine）       │
+└───────────────────────┬─────────────────────────────────┘
+                        │ anthropic.messages.create(tools=…)
+┌───────────────────────▼─────────────────────────────────┐
+│                  Agent 层 MainAgent                       │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │              Agentic Loop（max 8 轮）             │   │
+│  │  LLM 推理 → tool_use_blocks → 执行 → 追加消息   │   │
+│  │  终止条件：commit_opinion / commit_answer /       │   │
+│  │            commit_clarification / 迭代上限        │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                          │
+│  System Prompt（行为规范）  ×  工具 description（选择依据）│
+│  无独立意图识别层 — 模型单次推理自主决策                  │
+└───────────────────────┬─────────────────────────────────┘
+                        │ ToolExecutor.execute(name, input)
+┌───────────────────────▼─────────────────────────────────┐
+│                   工具层 Tool / Skill                     │
+│                                                          │
+│  11 个工具 Schema（LLM 可见）                            │
+│    resolve_stock · get_stock_profile · get_price_snapshot│
+│    get_daily_bars · get_financial_factors                 │
+│    search_announcements · search_news · get_hot_list     │
+│    search_web · commit_opinion · commit_answer           │
+│                                                          │
+│  4 个 Skill（system_prompt + 工具子集 + max_iterations） │
+│    单股深度研究 / 快速价格核查 / 市场概览 / 多股比较      │
+└───────────────────────┬─────────────────────────────────┘
+                        │ Provider 接口（ABC）
+┌───────────────────────▼─────────────────────────────────┐
+│                  Provider 层（可替换）                    │
+│                                                          │
+│  MarketDataProvider ←── TushareMarketDataProvider        │
+│  AnnouncementProvider ← CninfoAnnouncementProvider       │
+│  NewsProvider ────────← AKShareNewsProvider              │
+│  HotlistProvider ─────← AKShareHotlistProvider           │
+│  WebSearchProvider ───← DuckDuckGo（ddgs）               │
+│                                                          │
+│  Agent 层只依赖抽象接口，替换为 Wind / iFinD 无需改上层  │
+└───────────────────────┬─────────────────────────────────┘
+                        │
+┌───────────────────────▼─────────────────────────────────┐
+│                  服务层 Services                          │
+│  TraceStore（JSONL 本地持久化，按 turn_id 检索）          │
+│  ProfileStore（用户记忆 JSON，跨会话保留偏好）            │
+│  ClarificationEngine（结构化追问生成）                    │
+└─────────────────────────────────────────────────────────┘
+```
+
+**核心设计决策**
+
+- **单 Agent 统一决策**：意图路由与数据分析合并为一次 LLM 调用，工具 description 即行为规范，无独立意图识别层
+- **工具即接口**：`commit_opinion` / `commit_answer` / `commit_clarification` 是 Agent 的"返回值类型"，终止条件通过工具调用表达，而非代码判断
+- **Provider 抽象**：数据层以 ABC 接口隔离，当前实现（Tushare / AKShare / DuckDuckGo）可无缝替换为付费数据源
+- **Skill 作为提示模板**：每个 Skill 封装 system_prompt + 工具子集 + 迭代上限，场景扩展只需新增 Skill，不改主循环
+
+---
+
 ## 设计说明
 
 架构参考了 Claude Code 的 Agentic Loop 设计——单次推理决策、工具 description 驱动行为、无独立意图识别层。当前实现是可用的 MVP，工程上仍有较大优化空间：
