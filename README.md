@@ -264,15 +264,50 @@ uv run ashare check
 
 ---
 
+## 工具列表
+
+LLM 可调用的 8 个原子工具：
+
+| 工具 | 说明 | 数据来源 |
+|---|---|---|
+| `resolve_stock` | 股票代码/名称解析，模糊匹配候选标的 | Tushare / AKShare |
+| `get_stock_profile` | 公司基础资料：行业、市场、上市日期 | Tushare |
+| `get_price_snapshot` | 最新价格快照：现价、涨跌幅、换手率 | Tushare |
+| `get_daily_bars` | 历史日线行情（OHLCV），默认近 20 日 | Tushare |
+| `get_financial_factors` | 估值因子：PE/PB、市值、量比 | Tushare |
+| `search_announcements` | 近期公告搜索，默认近 30 天 | Tushare → AKShare 降级 |
+| `search_news` | 公司相关财经新闻，默认近 14 天 | AKShare |
+| `get_hot_list` | 今日热门/涨停/涨幅榜单 | AKShare → 网络搜索降级 |
+| `search_web` | 实时网络搜索：热点事件、板块动态、宏观政策 | DuckDuckGo (ddgs) |
+| `commit_opinion` | 分析完成后提交投研结论（触发输出） | — |
+
+---
+
+## Skill 列表
+
+系统根据意图自动选择 Skill，每个 Skill 决定可用工具集和 LLM 的分析框架：
+
+| Skill | 触发场景 | 可用工具 | 最大迭代 |
+|---|---|---|---|
+| **单股深度研究** | 输入股票代码或名称，未含快速查询词 | 全量 6 工具 + commit | 4 轮 |
+| **快速价格核查** | 含"多少钱/现价/今天涨跌"等关键词 | profile + snapshot + factors | 3 轮 |
+| **市场概览** | 问大盘、板块、宏观事件 | search_web + hot_list | 3 轮 |
+| **多股比较** | 同时提及 2 只以上股票 | 全量 6 工具 + commit | 5 轮 |
+
+---
+
 ## 数据源说明
 
-| 数据类型 | 主数据源 | 降级备用 |
-|---|---|---|
-| 行情 / 因子 | Tushare Pro | — |
-| 上市公司公告 | Tushare anns | AKShare stock_notice_report |
-| 财经新闻 | AKShare stock_news_em | — |
-| 热门榜单 | AKShare stock_hot_rank_em | stock_hot_up_em（涨幅榜） |
-| 网络搜索 | DuckDuckGo (ddgs) `.news()` | `.text()` 降级 |
+| 数据类型 | 主数据源 | 降级备用 | 说明 |
+|---|---|---|---|
+| 股票列表解析 | Tushare `stock_basic` | AKShare `stock_info_a_code_name` | 支持代码/名称模糊匹配 |
+| 实时价格 | Tushare `daily` | — | T+1，非实时 |
+| 估值因子 | Tushare `daily_basic` | — | PE/PB/市值/换手率/量比 |
+| 历史日线 | Tushare `daily` | — | OHLCV + 涨跌幅 |
+| 上市公司公告 | Tushare `stk_notices/anns` | AKShare `stock_notice_report` | Tushare 需 ≥2000 积分 |
+| 财经新闻 | AKShare `stock_news_em` | — | 东方财富新闻接口 |
+| 热门榜单 | AKShare `stock_hot_rank_em` | `stock_hot_up_em`（涨幅榜） | 网络问题时自动降级 |
+| 网络搜索 | DuckDuckGo `ddgs.news()` | `ddgs.text()`（无时间戳） | 返回真实发布时间 |
 
 ---
 
