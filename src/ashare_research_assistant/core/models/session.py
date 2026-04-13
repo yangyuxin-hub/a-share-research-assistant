@@ -51,6 +51,7 @@ class SessionState(BaseModel):
     evaluation: Optional[EvaluationResult] = None
     output_draft: Optional[OpinionCard] = None
     direct_answer: Optional[str] = None  # 纯知识问答的原始回复文本
+    conversation_history: list[dict] = []  # [{"role": "user"|"assistant", "content": str}]
     working_memory: WorkingMemory = Field(default_factory=WorkingMemory)
     user_memory_snapshot: Optional[UserMemoryProfile] = None
     trace: list[TraceEvent] = []
@@ -61,11 +62,29 @@ class SessionState(BaseModel):
         from datetime import datetime, timezone
 
         now = datetime.now(timezone.utc).isoformat()
+
+        # 把上一轮对话追加到历史（最多保留 10 轮）
+        history = list(self.conversation_history)
+        if self.user_input:
+            history.append({"role": "user", "content": self.user_input})
+        if self.direct_answer:
+            history.append({"role": "assistant", "content": self.direct_answer})
+        elif self.output_draft:
+            summary = self.output_draft.one_liner or self.output_draft.company_name
+            history.append({"role": "assistant", "content": f"[投研观点] {summary}"})
+        history = history[-20:]  # 保留最近 20 条（10 轮）
+
         return self.model_copy(
             update={
                 "turn_id": str(uuid.uuid4()),
                 "user_input": user_input,
                 "stage": "observing",
                 "updated_at": now,
+                "conversation_history": history,
+                "direct_answer": None,
+                "output_draft": None,
+                "research_draft": None,
+                "evaluation": None,
+                "trace": [],
             }
         )

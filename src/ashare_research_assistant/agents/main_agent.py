@@ -13,6 +13,7 @@
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
@@ -53,7 +54,7 @@ from ashare_research_assistant.services.trace_store import TraceStore
 
 logger = logging.getLogger(__name__)
 
-MAX_ITERATIONS = 12
+MAX_ITERATIONS = 8
 _DIRECT_ANSWER_KEYWORDS = (
     "你好", "您好", "hi", "hello", "hey", "hi,",
     "你是谁", "你能做什么", "有什么用", "介绍一下", "怎么用",
@@ -253,29 +254,83 @@ ALL_TOOLS = [
 
 # ── System Prompt ─────────────────────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """你是 A 股投研助手，全程中文，风格简洁。
+_SYSTEM_PROMPT = """你是 A 股投研助手，一个专注于 A 股市场的量化投研 Copilot。
 
-## 工具调用规则（必须遵守）
+你的能力：单股深度分析（行情+公告+新闻→观点卡）、板块/主题探索、热股发现、大盘询问、投研知识解释。
+全程用中文回答。风格简洁、克制，不废话，不重复用户的话。
 
-1. **涉及股票名称/代码** → 第一步调用 resolve_stock
-2. **大盘/宏观/事件询问** → 直接调用 search_web 或 get_hot_list，无需 resolve_stock
-3. **概念/术语/问候** → 调用 commit_answer（不要调用数据工具）
-4. **多只候选或意图模糊** → 调用 commit_clarification
-5. **数据收集完毕** → 调用 commit_opinion 提交完整分析
+---
 
-## 股票分析流程
-resolve_stock 返回后，同时调用全部数据工具：get_stock_profile + get_price_snapshot + get_daily_bars + get_financial_factors + search_announcements + search_news。
-数据返回后，调用 commit_opinion 提交结论。
+## 核心决策规则
 
-## commit_opinion 必填
-stance (bullish/neutral/bearish)、confidence (high/medium/low)、
-one_liner（20字内）、thesis、core_drivers、key_risks、horizon_label。
-数据缺失时注明，不虚构数据。
+### 第一步：判断是否需要调用工具
 
-## commit_clarification
-- symbol_disambiguation：多只候选
-- goal_clarification：意图模糊
-- candidates 字段放入候选列表，格式：[{"symbol":"600519","name":"贵州茅台"},...]
+**直接回答（不调用工具）**：
+- 问候、闲聊：你好、您好、早安、hi
+- 询问身份/能力：你是谁、你能做什么、怎么用
+- 术语/概念解释：PE是什么、MACD金叉是什么
+- 以上情况请调用 commit_answer 提交回答。
+
+**必须调用 resolve_stock（第一步）**：
+- 用户输入包含任何股票名称、简称、代码时，先调用 resolve_stock 获取真实代码。
+- 常见表述：茅台、平安、这只股、那支股票、帮我看看 XXX
+- 如果输入为 6 位数字代码（如 600519），**直接用该代码调用 resolve_stock**。
+
+resolve_stock 返回候选列表后，再决定下一步：
+- **1个候选** → 继续调用 get_stock_profile / get_price_snapshot 等数据工具
+- **多个候选** → 调用 commit_clarification 让用户选一只
+- **空结果** → 可能是主题词或概念词，调用 search_web 或 commit_answer
+
+**无需 resolve_stock、直接搜索**：
+- 大盘行情、宏观事件、政策影响（如"特朗普关税对A股影响"）→ search_web → commit_answer
+- 今日热门股/涨停股 → get_hot_list → commit_answer
+- 探索板块/概念股名单（如"英伟达产业链"、"AI算力板块有哪些股"）→ search_web（1-2次）→ **必须调用 commit_answer** 提交结果，不要直接输出文字
+
+---
+
+## 工具使用指南
+
+### resolve_stock
+先调用此工具获取真实股票代码，再调用数据工具。**任何涉及具体股票的请求，第一步永远是 resolve_stock。**
+
+### 行情/财务工具（resolve_stock 后使用）
+- get_stock_profile：公司基础资料，必调
+- get_price_snapshot：当前价格快照，必调
+- get_daily_bars：历史日线，判断趋势，必调
+- get_financial_factors：PE/PB/市值等估值因子，必调
+- search_announcements：近30天公告，必调
+- search_news：近14天新闻，必调
+
+### 市场概览工具（无需 resolve_stock）
+- search_web：实时网络搜索，搜索词要包含具体事件+A股关键词
+- get_hot_list：今日热门/涨停榜单
+
+### 提交工具
+- commit_opinion：完成数据收集后，提交完整投研观点
+- commit_answer：纯知识/闲聊，直接提交文字回答
+- commit_clarification：需要追问时提交问题
+
+---
+
+## 分析框架（调用完数据工具后）
+
+- **交易视角**：催化剂和预期差
+- **估值视角**：PE/PB 相对历史和同业
+- **事件视角**：近期公告/新闻关键信息
+- **技术视角**：量价趋势
+
+价格目标（price_target）基于近期压力/支撑位估算，要有逻辑支撑。
+数据缺失时，在对应字段留空，并在 thesis 中注明。
+
+## commit_clarification 使用规范
+
+| clarification_type | 适用场景 | question 示例 |
+|---|---|---|
+| symbol_disambiguation | 多只股票候选 | "找到多只相关股票，请确认您想分析哪一只：XXX" |
+| goal_clarification | 意图不明确 | "您是想了解某只具体股票，还是想探索某个板块？" |
+| theme_exploration | 主题探索无标的 | "您想深入了解哪个主题板块？" |
+
+候选列表放在 candidates 字段，格式：[{"symbol":"600519","name":"贵州茅台"},...]
 """
 
 
@@ -336,31 +391,48 @@ class MainAgent:
             web_search=self._web_search,
         )
         self._executor = executor
-        self._resolved_cache: dict[str, StockIdentifier] = {}
-        self._failed_tools: set[str] = set()  # 记录失败的工具名
+        self._resolved_cache = {}
 
         user_input = state.user_input
-        messages: list[dict] = [{"role": "user", "content": user_input}]
+        messages: list[dict] = list(state.conversation_history)
+        messages.append({"role": "user", "content": user_input})
 
         for iteration in range(MAX_ITERATIONS):
-            try:
-                response = self._client.messages.create(
-                    model=self._model,
-                    max_tokens=2048,
-                    system=_SYSTEM_PROMPT,
-                    tools=ALL_TOOLS,
-                    tool_choice={"type": "any"},
-                    messages=messages,
-                )
-            except Exception as e:
-                logger.error(f"MainAgent LLM 调用失败 (iter={iteration}): {e}")
-                return self._degraded(state, f"LLM 调用失败：{e}")
+            response = None
+            for attempt in range(3):
+                try:
+                    response = self._client.messages.create(
+                        model=self._model,
+                        max_tokens=1024,
+                        system=_SYSTEM_PROMPT,
+                        tools=ALL_TOOLS,
+                        tool_choice={"type": "any"},
+                        messages=messages,
+                    )
+                    break
+                except Exception as e:
+                    is_overloaded = "overloaded" in str(e).lower() or "503" in str(e)
+                    if is_overloaded and attempt < 2:
+                        wait = 2 ** attempt * 3  # 3s, 6s
+                        logger.warning(f"API 过载，{wait}s 后重试 (iter={iteration}, attempt={attempt+1}): {e}")
+                        time.sleep(wait)
+                    else:
+                        logger.error(f"MainAgent LLM 调用失败 (iter={iteration}): {e}")
+                        return self._degraded(state, f"LLM 调用失败：{e}")
+            if response is None:
+                return self._degraded(state, "LLM 调用失败：重试耗尽")
 
             logger.debug(f"[MainAgent] iter={iteration} stop_reason={response.stop_reason}")
 
             tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
             if not tool_use_blocks:
-                # LLM 直接结束，无工具调用 → 降级
+                # LLM 直接结束，无工具调用 → 提取文本作为回答
+                text = "".join(
+                    b.text for b in response.content if hasattr(b, "text")
+                ).strip()
+                if text:
+                    logger.warning("LLM 无工具调用直接结束，提取文本作为回答")
+                    return self._build_direct_answer_state(state, {"text": text})
                 logger.warning("LLM 无工具调用直接结束，降级")
                 return self._degraded(state, "分析未完成")
 
@@ -412,15 +484,6 @@ class MainAgent:
 
                 else:
                     result_text = executor.execute(block.name, block.input)
-                    # 检测工具是否失败（返回错误信息）
-                    is_failure = (
-                        result_text.startswith("工具执行失败")
-                        or "失败" in result_text
-                        and "暂未启用" not in result_text
-                        and "暂无" not in result_text
-                    )
-                    if is_failure:
-                        self._failed_tools.add(block.name)
                     state.trace.append(_trace(
                         state, "llm", f"tool:{block.name}",
                         result_text[:80].replace("\n", " "),
@@ -446,47 +509,22 @@ class MainAgent:
                     state, final_data, list(self._resolved_cache.values()), executor.last_price
                 )
 
-        # 超过迭代次数 → 尝试用已有数据构造回答
+        # 超过迭代次数，但已有价格数据 → 构造直接回答
         resolved = list(self._resolved_cache.values())
-        if resolved:
+        if resolved and executor.last_price is not None:
             stock = resolved[0]
-            # 优先用已有的价格数据
-            if executor.last_price is not None:
-                answer_text = (
-                    f"{stock.name}（{stock.symbol}）当前价格：{executor.last_price:.2f} 元。"
-                )
-                logger.warning(f"MainAgent 超过迭代次数，用已有价格数据构造回答")
-                return self._build_direct_answer_state(state, {"text": answer_text})
-            # 没有价格数据时，同步获取一个快照
-            try:
-                snap = self._market.get_price_snapshot(stock.symbol)
-                if snap:
-                    answer_text = (
-                        f"{stock.name}（{stock.symbol}）当前价格：{snap.current_price:.2f} 元"
-                        + (f"，涨跌：{snap.pct_change:+.2f}%" if snap.pct_change is not None else "")
-                        + "。"
-                    )
-                    logger.warning(f"MainAgent 超过迭代次数，同步获取价格：{snap.current_price}")
-                    return self._build_direct_answer_state(state, {"text": answer_text})
-            except Exception as e:
-                logger.warning(f"同步获取价格失败: {e}")
+            answer_text = (
+                f"{stock.name}（{stock.symbol}）当前价格：{executor.last_price:.2f} 元。"
+            )
+            logger.warning(
+                f"MainAgent 超过迭代次数，用已有价格数据构造回答：{answer_text}"
+            )
+            return self._build_direct_answer_state(state, {"text": answer_text})
 
-        # 市场/大盘查询超过迭代次数 → 直接获取热门榜兜底
-        if not resolved and self._web_search:
-            try:
-                hot_result = self._web_search.search_news("A股大盘 今日行情", max_results=5)
-                if hot_result:
-                    lines = ["今日 A 股市场概况："]
-                    for n in hot_result[:5]:
-                        title = n.title[:60]
-                        lines.append(f"• {title}")
-                    answer_text = "\n".join(lines)
-                    logger.warning("MainAgent 大盘查询超过迭代次数，用网络搜索结果兜底")
-                    return self._build_direct_answer_state(state, {"text": answer_text})
-            except Exception as e:
-                logger.warning(f"大盘查询兜底失败: {e}")
+        logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}")
+        return self._degraded(state, f"超过最大迭代次数 {MAX_ITERATIONS}")
 
-        logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}，失败工具：{self._failed_tools}")
+        logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}")
         return self._degraded(state, f"超过最大迭代次数 {MAX_ITERATIONS}")
 
     # ── 工具处理 ──────────────────────────────────────────────────────────────
@@ -687,7 +725,7 @@ class MainAgent:
                 model=self._model,
                 max_tokens=512,
                 system=[TextBlock(type="text", text=system_text)],
-                messages=[{"role": "user", "content": user_input}],
+                messages=list(state.conversation_history) + [{"role": "user", "content": user_input}],
             )
         except Exception as e:
             logger.error(f"_direct_answer LLM 调用失败: {e}")
