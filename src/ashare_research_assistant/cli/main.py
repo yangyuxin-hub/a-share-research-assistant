@@ -48,6 +48,46 @@ def chat(
 
 
 @app.command()
+def web(
+    port: int = typer.Option(7860, "--port", help="本地监听端口"),
+    host: str = typer.Option("127.0.0.1", "--host", help="监听地址，0.0.0.0 可局域网访问"),
+    log_level: str = typer.Option("WARNING", "--log-level", help="日志级别"),
+    reload: bool = typer.Option(False, "--reload", help="开发模式：代码改动自动重载", hidden=True),
+) -> None:
+    """启动 Web 浏览器界面。"""
+    _setup_logging(log_level)
+
+    from ashare_research_assistant.config.settings import settings
+
+    if not settings.anthropic_api_key:
+        console.print("[bold red]错误：请在 .env 中配置 ASHARE_API_KEY[/bold red]")
+        raise typer.Exit(1)
+
+    try:
+        import uvicorn
+    except ImportError:
+        console.print("[bold red]错误：缺少依赖，请运行：uv sync[/bold red]")
+        raise typer.Exit(1)
+
+    settings.ensure_local_dirs()
+
+    url = f"http://{'localhost' if host == '127.0.0.1' else host}:{port}"
+    console.print(f"  启动中… 请在浏览器打开 [bold cyan]{url}[/bold cyan]")
+    console.print("  Ctrl+C 退出\n")
+
+    from ashare_research_assistant.web.server import create_app
+    uvicorn.run(
+        create_app() if not reload else
+            "ashare_research_assistant.web.server:create_app",
+        host=host,
+        port=port,
+        log_level="warning",
+        factory=reload,
+        reload=reload,
+    )
+
+
+@app.command()
 def check() -> None:
     """检查配置和依赖是否正常。"""
     from ashare_research_assistant.config.settings import settings

@@ -86,13 +86,14 @@ class CninfoAnnouncementProvider(AnnouncementProvider):
                 if df is not None and not df.empty:
                     break
                 df = None
-            except Exception:
+            except Exception as _api_err:
+                logger.warning(f"Tushare 接口 [{api_name}] 调用失败: {_api_err}")
                 df = None
                 continue
 
         if df is None or df.empty:
-            logger.warning(f"CninfoAnnouncementProvider: {symbol} 无公告数据（Tushare 接口不可用或无数据）")
-            return []
+            logger.debug(f"CninfoAnnouncementProvider: {symbol} Tushare 接口均未返回数据，尝试 AKShare 降级")
+            return self._fallback_akshare(symbol, start_date, end_date, keywords, max_results)
 
         try:
             items = []
@@ -115,6 +116,49 @@ class CninfoAnnouncementProvider(AnnouncementProvider):
             return items
         except Exception as e:
             logger.warning(f"CninfoAnnouncementProvider.search_announcements 解析失败 [{symbol}]: {e}")
+            return []
+
+    def _fallback_akshare(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        keywords: Optional[list[str]],
+        max_results: int,
+    ) -> list[AnnouncementItem]:
+        """Tushare 接口不可用时，用 AKShare stock_notice_report 降级。"""
+        try:
+            import akshare as ak
+            df = ak.stock_notice_report(symbol=symbol, date=start_date.replace("-", ""))
+            if df is None or df.empty:
+                logger.warning(f"CninfoAnnouncementProvider: {symbol} 公告数据不可用（Tushare 积分不足 + AKShare 无数据）")
+                return []
+            items = []
+            for _, row in df.head(max_results).iterrows():
+                title = str(row.get("公告标题", row.get("title", "")))
+                if not title:
+                    continue
+                if keywords and not any(kw in title for kw in keywords):
+                    continue
+                publish_time = str(row.get("公告日期", row.get("ann_date", "")))
+                items.append(AnnouncementItem(
+                    id=f"akshare_{symbol}_{len(items)}",
+                    symbol=symbol,
+                    title=title,
+                    publish_time=publish_time,
+                    category=str(row.get("公告类型", "")) or None,
+                    source=SourceMeta(
+                        provider="akshare",
+                        endpoint="stock_notice_report",
+                        fetched_at=_now_iso(),
+                        reliability="aggregated",
+                    ),
+                ))
+            if not items:
+                logger.warning(f"CninfoAnnouncementProvider: {symbol} 公告数据不可用（Tushare 积分不足）")
+            return items
+        except Exception as e:
+            logger.warning(f"CninfoAnnouncementProvider: {symbol} 公告数据不可用（Tushare 积分不足，AKShare 降级也失败: {e}）")
             return []
 
     def get_announcement_detail(self, announcement_id: str) -> Optional[AnnouncementDocument]:

@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>A股投研助手</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #ffffff;
+      --bg-subtle:    #f9f9f8;
+      --border:       #e8e8e5;
+      --text:         #1a1a1a;
+      --text-muted:   #787878;
+      --user-bg:      #f4f4f0;
+      --accent:       #c96a2e;   /* Claude-orange 近似 */
+      --accent-dark:  #a85520;
+      --radius-msg:   1.125rem;
+      --font:         -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue",
+                      Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+
+    html, body { height: 100%; overflow: hidden; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      font-size: 15px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Header ────────────────────────────────────────────────── */
+    header {
+      height: 54px;
+      padding: 0 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      background: var(--bg);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      text-decoration: none;
+      user-select: none;
+    }
+
+    .logo-mark {
+      width: 30px; height: 30px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      flex-shrink: 0;
+    }
+
+    .new-btn {
+      height: 32px;
+      padding: 0 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: none;
+      color: var(--text-muted);
+      font-size: 13px;
+      font-family: var(--font);
+      cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+      transition: background 0.12s, color 0.12s;
+    }
+    .new-btn:hover { background: var(--user-bg); color: var(--text); }
+
+    /* ── Scroll area ───────────────────────────────────────────── */
+    #scroll {
+      flex: 1;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+    }
+    #scroll::-webkit-scrollbar { width: 5px; }
+    #scroll::-webkit-scrollbar-thumb { background: #d8d8d4; border-radius: 3px; }
+
+    #feed {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 28px 20px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    /* ── Welcome screen ────────────────────────────────────────── */
+    #welcome {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 56px 20px 24px;
+      text-align: center;
+      gap: 10px;
+    }
+    .welcome-icon {
+      width: 52px; height: 52px;
+      background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+      border-radius: 16px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff;
+      font-size: 24px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    #welcome h1 { font-size: 22px; font-weight: 700; }
+    #welcome p  { font-size: 14px; color: var(--text-muted); max-width: 380px; line-height: 1.6; }
+
+    .suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 14px;
+    }
+    .sug-btn {
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13.5px;
+      font-family: var(--font);
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .sug-btn:hover { background: var(--user-bg); border-color: #ccc; }
+
+    /* ── Message rows ──────────────────────────────────────────── */
+    .row {
+      display: flex;
+      gap: 12px;
+      animation: fadeUp 0.2s ease;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .row.user { flex-direction: row-reverse; }
+
+    /* Avatar */
+    .av {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 2px;
+    }
+    .av.ai   { background: linear-gradient(135deg, var(--accent), var(--accent-dark)); color: #fff; }
+    .av.user { background: #e8e8e4; color: var(--text-muted); }
+
+    /* Bubble wrapper */
+    .msg { flex: 1; min-width: 0; }
+    .row.user .msg { display: flex; justify-content: flex-end; }
+
+    .bubble-user {
+      display: inline-block;
+      max-width: 75%;
+      background: var(--user-bg);
+      border-radius: var(--radius-msg);
+      border-bottom-right-radius: 4px;
+      padding: 10px 15px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 15px;
+    }
+
+    .bubble-ai {
+      width: 100%;
+      padding: 2px 0;
+    }
+
+    /* ── Tool calls list ───────────────────────────────────────── */
+    .tools { display: flex; flex-direction: column; gap: 3px; margin-bottom: 4px; }
+
+    .tool-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+    .tool-row.done { color: #aaa; }
+
+    .tool-spinner {
+      width: 14px; height: 14px;
+      border: 2px solid #d0d0cc;
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .tool-check {
+      width: 14px; height: 14px; flex-shrink: 0;
+      color: #22c55e;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .tool-check svg { width: 14px; height: 14px; }
+
+    .tool-name  { font-weight: 500; }
+    .tool-brief { color: #bbb; }
+
+    /* ── Typing indicator ──────────────────────────────────────── */
+    .typing {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 0;
+      color: var(--text-muted);
+      font-size: 13.5px;
+    }
+    .dots { display: flex; gap: 4px; }
+    .dot {
+      width: 5px; height: 5px;
+      background: var(--text-muted);
+      border-radius: 50%;
+      opacity: 0.4;
+      animation: blink 1.2s ease-in-out infinite;
+    }
+    .dot:nth-child(2) { animation-delay: .2s; }
+    .dot:nth-child(3) { animation-delay: .4s; }
+    @keyframes blink {
+      0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
+      40% { opacity: 1; transform: scale(1.15); }
+    }
+
+    /* ── Markdown content ──────────────────────────────────────── */
+    .md { width: 100%; }
+    .md > *:first-child { margin-top: 0 !important; }
+    .md > *:last-child  { margin-bottom: 0 !important; }
+
+    .md h1 { font-size: 19px; font-weight: 700; margin: 14px 0 6px; line-height: 1.3; }
+    .md h2 { font-size: 16px; font-weight: 700; margin: 12px 0 5px; }
+    .md h3 { font-size: 14.5px; font-weight: 600; margin: 10px 0 4px; }
+    .md p  { margin: 5px 0; }
+    .md ul, .md ol { margin: 5px 0; padding-left: 22px; }
+    .md li { margin: 3px 0; }
+    .md li > p { margin: 2px 0; }
+
+    .md table {
+      border-collapse: collapse;
+      margin: 10px 0;
+      font-size: 13.5px;
+      width: 100%;
+    }
+    .md th, .md td {
+      border: 1px solid var(--border);
+      padding: 7px 12px;
+      text-align: left;
+    }
+    .md th { background: var(--bg-subtle); font-weight: 600; font-size: 13px; }
+    .md tr:nth-child(even) td { background: var(--bg-subtle); }
+
+    .md code {
+      background: #f0f0ec;
+      padding: 2px 5px;
+      border-radius: 4px;
+      font-family: "SF Mono", "Cascadia Code", Menlo, monospace;
+      font-size: 13px;
+    }
+    .md pre {
+      background: #f5f5f2;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 8px 0;
+    }
+    .md pre code { background: none; padding: 0; border-radius: 0; }
+
+    .md blockquote {
+      border-left: 3px solid var(--border);
+      padding: 4px 0 4px 14px;
+      color: var(--text-muted);
+      margin: 8px 0;
+    }
+    .md hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+    .md strong { font-weight: 600; }
+    .md a { color: var(--accent); text-decoration: none; }
+    .md a:hover { text-decoration: underline; }
+
+    /* Details / summary (分析过程折叠) */
+    .md details {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2px 0;
+      margin: 8px 0;
+      font-size: 13.5px;
+    }
+    .md summary {
+      padding: 8px 14px;
+      cursor: pointer;
+      user-select: none;
+      color: var(--text-muted);
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .md summary::-webkit-details-marker { display: none; }
+    .md summary::before {
+      content: "▶";
+      font-size: 10px;
+      transition: transform 0.15s;
+    }
+    .md details[open] summary::before { transform: rotate(90deg); }
+    .md details > :not(summary) { padding: 4px 14px 10px; }
+
+    /* Divider between tools and result */
+    .result-sep {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 10px 0;
+    }
+
+    /* ── Input bar ─────────────────────────────────────────────── */
+    #bar {
+      flex-shrink: 0;
+      padding: 10px 18px 18px;
+      background: var(--bg);
+    }
+
+    .input-wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      border: 1.5px solid var(--border);
+      border-radius: 1.25rem;
+      padding: 10px 12px 10px 16px;
+      background: var(--bg);
+      box-shadow: 0 2px 14px rgba(0,0,0,0.06);
+      transition: border-color 0.15s;
+    }
+    .input-wrap:focus-within { border-color: var(--accent); }
+
+    #inp {
+      flex: 1;
+      border: none;
+      outline: none;
+      resize: none;
+      background: transparent;
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.55;
+      color: var(--text);
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    #inp::placeholder { color: #b8b8b4; }
+
+    #send {
+      width: 34px; height: 34px;
+      flex-shrink: 0;
+      border: none;
+      border-radius: 50%;
+      background: var(--text);
+      color: #fff;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.12s, transform 0.1s;
+    }
+    #send:hover   { background: #3a3a3a; }
+    #send:active  { transform: scale(0.93); }
+    #send:disabled { background: #d0d0cc; cursor: default; transform: none; }
+    #send svg { width: 16px; height: 16px; }
+
+    .hint {
+      text-align: center;
+      font-size: 11.5px;
+      color: #c4c4c0;
+      margin-top: 7px;
+      max-width: 720px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <div class="logo-mark">A</div>
+    A股投研助手
+  </div>
+  <button class="new-btn" onclick="newChat()">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+    </svg>
+    新对话
+  </button>
+</header>
+
+<!-- Feed -->
+<div id="scroll">
+  <div id="feed">
+    <!-- Welcome -->
+    <div id="welcome">
+      <div class="welcome-icon">A</div>
+      <h1>A 股投研助手</h1>
+      <p>输入股票代码、名称或自然语言问题，获取 AI 投研分析。</p>
+      <div class="suggestions">
+        <button class="sug-btn" onclick="quick('分析贵州茅台')">分析贵州茅台</button>
+        <button class="sug-btn" onclick="quick('AI板块怎么样')">AI 板块怎么样</button>
+        <button class="sug-btn" onclick="quick('今天大盘怎么样')">今天大盘怎么样</button>
+        <button class="sug-btn" onclick="quick('帮助')">帮助</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Input bar -->
+<div id="bar">
+  <div class="input-wrap">
+    <textarea id="inp" rows="1" placeholder="输入股票代码或名称…"
+      onkeydown="onKey(event)" oninput="resize(this)"></textarea>
+    <button id="send" onclick="send()" title="发送（Enter）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+           stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="19" x2="12" y2="5"/>
+        <polyline points="5 12 12 5 19 12"/>
+      </svg>
+    </button>
+  </div>
+  <p class="hint">Enter 发送 &nbsp;·&nbsp; Shift+Enter 换行 &nbsp;·&nbsp; 输入「展开」查看完整分析</p>
+</div>
+
+<script>
+  // ── Markdown ──────────────────────────────────────────────────
+  marked.use({ breaks: true, gfm: true });
+
+  // ── Session ───────────────────────────────────────────────────
+  let sid = localStorage.getItem('sid') || newSid();
+  function newSid() {
+    const id = crypto.randomUUID();
+    localStorage.setItem('sid', id);
+    return id;
+  }
+
+  // ── State ─────────────────────────────────────────────────────
+  let busy = false;
+
+  // ── Helpers ───────────────────────────────────────────────────
+  const feed    = () => document.getElementById('feed');
+  const scrollEl = () => document.getElementById('scroll');
+  const inp     = () => document.getElementById('inp');
+  const sendBtn = () => document.getElementById('send');
+
+  function scrollBot() {
+    const s = scrollEl();
+    s.scrollTop = s.scrollHeight;
+  }
+
+  function resize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+  }
+
+  function esc(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Welcome ───────────────────────────────────────────────────
+  function removeWelcome() {
+    const w = document.getElementById('welcome');
+    if (w) w.remove();
+  }
+
+  function newChat() {
+    sid = newSid();
+    feed().innerHTML = `
+      <div id="welcome">
+        <div class="welcome-icon">A</div>
+        <h1>A 股投研助手</h1>
+        <p>输入股票代码、名称或自然语言问题，获取 AI 投研分析。</p>
+        <div class="suggestions">
+          <button class="sug-btn" onclick="quick('分析贵州茅台')">分析贵州茅台</button>
+          <button class="sug-btn" onclick="quick('AI板块怎么样')">AI 板块怎么样</button>
+          <button class="sug-btn" onclick="quick('今天大盘怎么样')">今天大盘怎么样</button>
+          <button class="sug-btn" onclick="quick('帮助')">帮助</button>
+        </div>
+      </div>`;
+  }
+
+  function quick(text) {
+    inp().value = text;
+    resize(inp());
+    send();
+  }
+
+  // ── DOM builders ──────────────────────────────────────────────
+  function addUser(text) {
+    removeWelcome();
+    const row = document.createElement('div');
+    row.className = 'row user';
+    row.innerHTML = `
+      <div class="av user">你</div>
+      <div class="msg"><div class="bubble-user">${esc(text)}</div></div>`;
+    feed().appendChild(row);
+    scrollBot();
+  }
+
+  function addAI() {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <div class="av ai">A</div>
+      <div class="msg">
+        <div class="bubble-ai">
+          <div class="tools" id="tc"></div>
+          <div class="typing" id="ty">
+            <span>正在分析</span>
+            <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+          </div>
+          <div class="md" id="rc" style="display:none"></div>
+        </div>
+      </div>`;
+    feed().appendChild(row);
+    scrollBot();
+  }
+
+  // icon svgs
+  const CHECK_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+  const SPINNER   = `<div class="tool-spinner"></div>`;
+
+  function addTool(label, brief) {
+    const tc = document.getElementById('tc');
+    if (!tc) return;
+
+    // Mark previous pending as done
+    const prev = tc.querySelector('.tool-row[data-pending]');
+    if (prev) {
+      prev.removeAttribute('data-pending');
+      prev.classList.add('done');
+      prev.querySelector('.ti').innerHTML = `<div class="tool-check">${CHECK_SVG}</div>`;
+    }
+
+    const row = document.createElement('div');
+    row.className = 'tool-row';
+    row.setAttribute('data-pending', '1');
+    row.innerHTML = `
+      <span class="ti">${SPINNER}</span>
+      <span class="tool-name">${esc(label)}</span>
+      ${brief ? `<span class="tool-brief">— ${esc(brief)}</span>` : ''}`;
+    tc.appendChild(row);
+    scrollBot();
+  }
+
+  function finishTools() {
+    const tc = document.getElementById('tc');
+    if (!tc) return;
+    const pending = tc.querySelector('.tool-row[data-pending]');
+    if (pending) {
+      pending.removeAttribute('data-pending');
+      pending.classList.add('done');
+      pending.querySelector('.ti').innerHTML = `<div class="tool-check">${CHECK_SVG}</div>`;
+    }
+  }
+
+  function showResult(content) {
+    const ty = document.getElementById('ty');
+    if (ty) ty.remove();
+    finishTools();
+
+    const tc = document.getElementById('tc');
+    if (tc && tc.children.length > 0) {
+      tc.after(Object.assign(document.createElement('hr'), { className: 'result-sep' }));
+    }
+
+    const rc = document.getElementById('rc');
+    if (rc) {
+      rc.style.display = 'block';
+      rc.innerHTML = marked.parse(content);
+    }
+    scrollBot();
+  }
+
+  // ── Key handler ───────────────────────────────────────────────
+  function onKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  }
+
+  // ── Send ──────────────────────────────────────────────────────
+  async function send() {
+    if (busy) return;
+    const text = inp().value.trim();
+    if (!text) return;
+
+    inp().value = '';
+    inp().style.height = 'auto';
+    sendBtn().disabled = true;
+    busy = true;
+
+    addUser(text);
+    addAI();
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text, session_id: sid }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buf += dec.decode(value, { stream: true });
+        const chunks = buf.split('\n\n');
+        buf = chunks.pop();
+
+        for (const chunk of chunks) {
+          if (!chunk.startsWith('data: ')) continue;
+          const raw = chunk.slice(6).trim();
+          if (raw === '[DONE]') break;
+
+          let ev;
+          try { ev = JSON.parse(raw); } catch { continue; }
+
+          if (ev.type === 'tool')   addTool(ev.label, ev.brief ?? '');
+          if (ev.type === 'result') showResult(ev.content);
+          if (ev.type === 'error')  showResult(`> ⚠️ ${ev.content}`);
+        }
+      }
+    } catch (err) {
+      showResult(`> ⚠️ 请求失败：${err.message}`);
+    } finally {
+      busy = false;
+      sendBtn().disabled = false;
+      inp().focus();
+    }
+  }
+</script>
+</body>
+</html>

@@ -87,14 +87,25 @@ class AKShareHotlistProvider:
         date: Optional[str] = None,
         top_n: int = 20,
     ) -> list[HotStockItem]:
-        """获取东方财富热门股票榜单。"""
-        try:
-            df = ak.stock_hot_rank_em()
-            items = _stock_hot_to_items(df, "stock_hot_rank_em")
-            return items[:top_n]
-        except Exception as e:
-            logger.warning(f"获取热门榜单失败: {e}")
-            return []
+        """获取东方财富热门股票榜单，依次降级尝试多个接口。"""
+        for fetcher, endpoint in [
+            (lambda: ak.stock_hot_rank_em(), "stock_hot_rank_em"),
+            (lambda: ak.stock_hot_up_em(), "stock_hot_up_em"),
+        ]:
+            try:
+                df = fetcher()
+                if df is not None and not df.empty:
+                    items = _stock_hot_to_items(df, endpoint)
+                    if items:
+                        return items[:top_n]
+            except Exception as e:
+                # 截断 URL 避免刷屏（代理错误时 URL 含百个 secid）
+                err_str = str(e)
+                short_err = err_str[:120] + "..." if len(err_str) > 120 else err_str
+                logger.debug(f"热门榜单接口 [{endpoint}] 失败: {short_err}")
+
+        logger.warning("所有热门榜单接口均不可用（网络/代理问题），返回空列表")
+        return []
 
     def get_limit_up_pool(
         self,

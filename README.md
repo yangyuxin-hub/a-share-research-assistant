@@ -1,6 +1,6 @@
 # A股投研助手
 
-交互式 A 股投研 CLI Copilot，面向中短线事件驱动研究。
+交互式 A 股投研 Copilot，面向中短线事件驱动研究。
 
 从高噪声信息中形成**可追踪、可解释的投资观点**——输入股票代码或名称，输出带证据链的双层观点卡。
 
@@ -13,6 +13,7 @@
 - **歧义主动追问**：多候选或意图模糊时调用 commit_clarification，而非盲目分析
 - **双层观点卡**：极简卡展示方向+价位+置信度，展开卡含证据链、多空分歧、观察项
 - **全链路 Trace**：分析过程 JSONL 记录，支持审计复盘
+- **CLI + Web 双界面**：终端 Rich 渲染，或浏览器 Gradio 界面，支持公网分享
 
 ---
 
@@ -65,9 +66,9 @@
           ┌───────────────────┴───────────────────┐
           ▼                                       ▼
 ┌──────────────────┐                   ┌──────────────────┐
-│   Trace Store     │                   │   CLI Renderer    │
-│  .local/trace.jsonl│                   │  Rich双层观点卡   │
-│  全过程JSONL记录  │                   │  极简卡 + 展开卡  │
+│   Trace Store     │                   │   渲染层          │
+│  .local/trace.jsonl│                  │  CLI: Rich双层卡  │
+│  全过程JSONL记录  │                   │  Web: Gradio界面  │
 └──────────────────┘                   └──────────────────┘
 ```
 
@@ -88,24 +89,40 @@
   │ ToolExecutor    │    │ ToolExecutor    │    │ ToolExecutor    │
   │ market_data    │    │ announcement    │    │ news           │
   └───────┬────────┘    └───────┬────────┘    └───────┬────────┘
-          │                       │                       │
-          ▼                       ▼                       ▼
-  ┌───────────────┐    ┌───────────────┐    ┌───────────────┐
-  │ Tushare Pro   │    │ CNINFO 巨潮  │    │ AKShare       │
-  │ (行情/公告)    │    │ (上市公司公告) │    │ (财经新闻)      │
-  └───────────────┘    └───────────────┘    └───────────────┘
+          │                     │                     │
+          ▼                     ▼                     ▼
+  ┌───────────────┐    ┌───────────────────────┐    ┌───────────────┐
+  │ Tushare Pro   │    │ Tushare anns (主)      │    │ AKShare       │
+  │ (行情/因子)    │    │ AKShare notice (降级)  │    │ (财经新闻)    │
+  └───────────────┘    └───────────────────────┘    └───────────────┘
            │
            ▼
   ┌──────────────────────────────────────────────────────────┐
-  │              AKShare (热股/板块数据)                    │
-  │  stock_hot_rank_em() / stock_zt_pool_em()           │
+  │       AKShare 热股榜单（主）/ 涨幅榜（降级）              │
+  │  stock_hot_rank_em() → stock_hot_up_em()                │
   └──────────────────────────────────────────────────┬───┘
                                                      │
                                     ┌────────────────┴──────────┐
-                                    │  SerpAPI (网络搜索)       │
-                                    │  search_news()           │
+                                    │  DuckDuckGo (ddgs)        │
+                                    │  网络搜索 / 实时新闻       │
                                     └───────────────────────────┘
 ```
+
+---
+
+## 界面展示
+
+### 电脑端 — 个股分析（贵州茅台 600519）
+
+![桌面端个股分析](docs/screenshots/desktop_stock.png)
+
+### 电脑端 — 板块分析（AI板块）
+
+![桌面端板块分析](docs/screenshots/desktop_sector.png)
+
+### 手机端（Cloudflare Tunnel 公网访问）
+
+![手机端](docs/screenshots/mobile.png)
 
 ---
 
@@ -162,20 +179,6 @@
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-```text
-你 > PE是什么意思
-... 正在分析...
-
-╭──────────────────────────────────────────────────────── 回答 ───╮
-│  **PE（市盈率）**                                               │
-│                                                                │
-│  PE = 股价 ÷ 每股收益（EPS）                                   │
-│                                                                │
-│  含义：投资者为获得 1 元利润愿意支付的价格。PE 越低，估值越便宜。 │
-│  举例：PE=20 意味着按当前盈利水平，20 年回本。                   │
-└──────────────────────────────────────────────────────────────────┘
-```
-
 ---
 
 ## 快速开始
@@ -204,8 +207,8 @@ cp .env.example .env
 编辑 `.env`：
 
 ```env
-CLAUDE_API_KEY=sk-ant-...
-CLAUDE_BASE_URL=https://your-proxy.com
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_BASE_URL=https://your-proxy.com   # 可选，使用中转时填写
 TUSHARE_TOKEN=your_tushare_token
 ```
 
@@ -213,11 +216,37 @@ TUSHARE_TOKEN=your_tushare_token
 
 ### 启动
 
+**终端 CLI 模式**
+
 ```bash
 uv run ashare chat
 ```
 
+**Web 浏览器模式**
+
+```bash
+uv run ashare web                    # 本地 http://localhost:7860
+uv run ashare web --port 8080        # 自定义端口
+uv run ashare web --host 0.0.0.0     # 局域网访问
+```
+
+**公网分享（通过 Cloudflare Tunnel）**
+
+```bash
+# 先启动 Web 服务
+uv run ashare web
+
+# 另开终端，用 cloudflared 暴露到公网
+cloudflared tunnel --url http://localhost:7860 --protocol http2
+```
+
 退出：`Ctrl+C`
+
+### 检查配置
+
+```bash
+uv run ashare check
+```
 
 ---
 
@@ -225,13 +254,25 @@ uv run ashare chat
 
 | 变量 | 说明 | 默认值 | 必需 |
 |---|---|---|---|
-| `CLAUDE_API_KEY` | Claude API 密钥（避免与 Claude Code CLI 冲突，不用标准名） | — | 必须 |
-| `CLAUDE_BASE_URL` | 自定义 API 端点（中转） | — | 可选 |
+| `ANTHROPIC_API_KEY` | Claude API 密钥 | — | 必须 |
+| `ANTHROPIC_BASE_URL` | 自定义 API 端点（中转） | — | 可选 |
 | `ANTHROPIC_MODEL` | 使用的模型 | `claude-sonnet-4-6` | 可选 |
-| `TUSHARE_TOKEN` | Tushare 行情数据 token | — | 推荐 |
+| `TUSHARE_TOKEN` | Tushare 行情数据 token（2000积分以上） | — | 推荐 |
 | `USE_AKSHARE_HOTLIST` | 启用 AKShare 热股发现 | `true` | 可选 |
 | `USE_CNINFO_PROVIDER` | 启用 CNINFO 公告数据源 | `true` | 可选 |
 | `LOG_LEVEL` | 日志级别 | `INFO` | 可选 |
+
+---
+
+## 数据源说明
+
+| 数据类型 | 主数据源 | 降级备用 |
+|---|---|---|
+| 行情 / 因子 | Tushare Pro | — |
+| 上市公司公告 | Tushare anns | AKShare stock_notice_report |
+| 财经新闻 | AKShare stock_news_em | — |
+| 热门榜单 | AKShare stock_hot_rank_em | stock_hot_up_em（涨幅榜） |
+| 网络搜索 | DuckDuckGo (ddgs) `.news()` | `.text()` 降级 |
 
 ---
 
@@ -245,8 +286,13 @@ src/ashare_research_assistant/
 │   ├── tools.py           # 12 个工具定义 + ToolExecutor
 │   └── skills.py          # Skill prompt 模板
 ├── cli/
+│   ├── main.py            # CLI 入口（chat / web / check 命令）
 │   ├── session.py         # CLI 会话循环
-│   └── renderer.py       # Rich 终端渲染
+│   └── renderer.py        # Rich 终端渲染
+├── web/
+│   ├── app.py             # Gradio Web 界面
+│   ├── server.py          # uvicorn 服务入口
+│   └── md_renderer.py     # Markdown 渲染工具
 ├── config/
 │   └── settings.py        # Pydantic Settings 配置
 ├── core/models/           # 统一 Pydantic Schema
@@ -254,10 +300,10 @@ src/ashare_research_assistant/
 │   ├── trace.py           # TraceEvent / SessionStage
 │   └── session.py         # SessionState
 ├── providers/             # 数据源抽象层
-│   ├── tushare/          # Tushare Pro（行情/公告）
-│   ├── cninfo/            # CNINFO 巨潮（上市公司公告）
-│   ├── akshare/          # AKShare（热股榜单/财经新闻）
-│   └── web_search_provider.py  # SerpAPI（网络搜索）
+│   ├── tushare/           # Tushare Pro（行情/因子）
+│   ├── cninfo/            # CNINFO 巨潮（公告，Tushare失败时降级AKShare）
+│   ├── akshare/           # AKShare（热股榜单/财经新闻）
+│   └── web_search_provider.py  # DuckDuckGo（网络搜索）
 └── services/
     ├── trace_store.py         # JSONL 全链路记录
     └── clarification_engine.py  # 结构化追问引擎
@@ -273,6 +319,9 @@ uv run pytest
 
 # 查看 trace 日志
 cat .local/trace.jsonl | python -m json.tool | less
+
+# Web 开发模式（代码改动自动重载）
+uv run ashare web --reload --log-level debug
 ```
 
 ---

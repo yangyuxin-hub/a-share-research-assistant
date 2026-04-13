@@ -16,12 +16,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _source(provider: str) -> SourceMeta:
-    return SourceMeta(
-        provider=provider,
-        fetched_at=_now_iso(),
-        reliability="scraped",
-    )
 
 
 class WebSearchProvider:
@@ -55,24 +49,38 @@ class WebSearchProvider:
 
         try:
             client = self._get_client()
-            # 使用 text 搜索（news API 在部分地区不稳定）
-            text_results = list(client.text(query, max_results=max_results))
+            # 优先用 news()，它返回真实发布时间；降级到 text()
+            try:
+                raw_results = list(client.news(query, max_results=max_results))
+                result_type = "news"
+            except Exception:
+                raw_results = list(client.text(query, max_results=max_results))
+                result_type = "text"
         except Exception as e:
             logger.warning(f"ddgs 搜索失败 [{query}]: {e}")
             return []
 
-        for item in text_results:
+        fetched_at = _now_iso()
+        for item in raw_results:
             try:
+                # news() 返回 "date"（ISO 字符串），text() 不返回时间
+                publish_time = item.get("date") or fetched_at
                 results.append(NewsItem(
-                    id=item.get("href", ""),
+                    id=item.get("url", item.get("href", "")),
                     title=item.get("title", ""),
-                    publish_time=_now_iso(),  # text 搜索不返回时间
+                    publish_time=publish_time,
                     outlet=item.get("source", ""),
-                    url=item.get("href"),
-                    summary=None,
+                    url=item.get("url", item.get("href")),
+                    summary=item.get("body") or None,
                     related_symbols=[],
                     topic_tags=[query],
-                    source=_source("ddgs"),
+                    source=SourceMeta(
+                        provider="ddgs",
+                        endpoint=result_type,
+                        fetched_at=fetched_at,
+                        data_timestamp=publish_time if item.get("date") else None,
+                        reliability="scraped",
+                    ),
                 ))
             except Exception as e:
                 logger.debug(f"解析搜索结果失败: {e}")

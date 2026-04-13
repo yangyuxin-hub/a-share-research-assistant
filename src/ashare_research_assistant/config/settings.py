@@ -13,8 +13,8 @@ class Settings(BaseSettings):
     llm_provider: str = "anthropic"
 
     # Anthropic
-    anthropic_api_key: str = "sk-yIvRp1ndxpNBV2fXMMJzM4MphHqIIKVZj33BLX5X6E9Db3LJ"
-    anthropic_base_url: str = "https://luckycodecc.cn/claude"
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
 
     # ChatGPT Codex（通过 ChatGPT Plus/Pro OAuth 订阅使用）
