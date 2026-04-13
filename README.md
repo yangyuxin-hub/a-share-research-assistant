@@ -1,377 +1,93 @@
 # A股投研助手
 
-交互式 A 股投研 Copilot，面向中短线事件驱动研究。
-
-从高噪声信息中形成**可追踪、可解释的投资观点**——输入股票代码或名称，输出带证据链的双层观点卡。
-
----
-
-## 功能特性
-
-- **统一 MainAgent**：意图路由与数据分析合为一体，LLM 自主决定调用哪些工具，节省一次模型调用，延迟降低约 30%
-- **12 个工具全挂载**：resolve_stock、行情、财务因子、公告、新闻、热门榜单、网络搜索，全部交给模型自主决策
-- **歧义主动追问**：多候选或意图模糊时调用 commit_clarification，而非盲目分析
-- **双层观点卡**：极简卡展示方向+价位+置信度，展开卡含证据链、多空分歧、观察项
-- **全链路 Trace**：分析过程 JSONL 记录，支持审计复盘
-- **CLI + Web 双界面**：终端 Rich 渲染，或浏览器 Gradio 界面，支持公网分享
-
----
-
-## 系统架构图
-
-```text
-┌─────────────────────────────────────────────────────────────┐
-│                          用户输入                            │
-│                    "贵州茅台现在多少钱"                      │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                        MainAgent                            │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  System Prompt + ALL_TOOLS (12个工具)               │   │
-│  │  LLM 自主决策调用哪个工具 → 循环直到 commit_*      │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                               │
-│  工具调用链（由 LLM 自主决定顺序）：                          │
-│  ┌──────────────┐                                         │
-│  │resolve_stock │──→ get_stock_profile                   │
-│  └──────┬───────┘         │                              │
-│         └──────────→ get_price_snapshot                   │
-│                       ↓                                   │
-│              ┌─────────┴──────────┐                       │
-│              ↓                    ↓                       │
-│  ┌──────────────────┐  ┌──────────────────┐             │
-│  │get_daily_bars     │  │get_financial_    │             │
-│  │(日线K图)         │  │factors(PE/PB)    │             │
-│  └────────┬─────────┘  └────────┬─────────┘             │
-│            └──────────┬───────────┘                       │
-│                       ↓                                    │
-│              ┌─────────┴──────────┐                       │
-│              │ search_announcements│                      │
-│              │ (近30天公告)        │                      │
-│              └─────────┬──────────┘                       │
-│                        ↓                                   │
-│              ┌─────────┴──────────┐                       │
-│              │ search_news         │                      │
-│              │ (近14天新闻)        │                      │
-│              └─────────┬──────────┘                       │
-│                        ▼                                    │
-│              ┌─────────┴──────────┐                       │
-│              │ commit_opinion      │                       │
-│              │ (提交完整投研观点)  │                       │
-│              └───────────────────┘                       │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-          ┌───────────────────┴───────────────────┐
-          ▼                                       ▼
-┌──────────────────┐                   ┌──────────────────┐
-│   Trace Store     │                   │   渲染层          │
-│  .local/trace.jsonl│                  │  CLI: Rich双层卡  │
-│  全过程JSONL记录  │                   │  Web: Gradio界面  │
-└──────────────────┘                   └──────────────────┘
-```
-
----
-
-## 数据流向图
-
-```text
-                        ┌──────────────────────────────────┐
-                        │         MainAgent (LLM Loop)       │
-                        │   system_prompt + 12 tools       │
-                        └──────────┬───────────────────────┘
-                                   │ execute(tool_name, input)
-           ┌───────────────────────┼───────────────────────┐
-           │                       │                       │
-           ▼                       ▼                       ▼
-  ┌────────────────┐    ┌────────────────┐    ┌────────────────┐
-  │ ToolExecutor    │    │ ToolExecutor    │    │ ToolExecutor    │
-  │ market_data    │    │ announcement    │    │ news           │
-  └───────┬────────┘    └───────┬────────┘    └───────┬────────┘
-          │                     │                     │
-          ▼                     ▼                     ▼
-  ┌───────────────┐    ┌───────────────────────┐    ┌───────────────┐
-  │ Tushare Pro   │    │ Tushare anns (主)      │    │ AKShare       │
-  │ (行情/因子)    │    │ AKShare notice (降级)  │    │ (财经新闻)    │
-  └───────────────┘    └───────────────────────┘    └───────────────┘
-           │
-           ▼
-  ┌──────────────────────────────────────────────────────────┐
-  │       AKShare 热股榜单（主）/ 涨幅榜（降级）              │
-  │  stock_hot_rank_em() → stock_hot_up_em()                │
-  └──────────────────────────────────────────────────┬───┘
-                                                     │
-                                    ┌────────────────┴──────────┐
-                                    │  DuckDuckGo (ddgs)        │
-                                    │  网络搜索 / 实时新闻       │
-                                    └───────────────────────────┘
-```
+A 股投研 Copilot，输入股票代码或自然语言，输出带证据链的投资观点卡。
 
 ---
 
 ## 界面展示
 
-### 电脑端 — 个股分析（贵州茅台 600519）
-
-![桌面端个股分析](docs/screenshots/desktop_stock.png)
-
-### 电脑端 — 板块分析（AI板块）
-
-![桌面端板块分析](docs/screenshots/desktop_sector.png)
-
-### 手机端（Cloudflare Tunnel 公网访问）
-
-![手机端](docs/screenshots/mobile.jpg)
-
----
-
-## 对话示例
-
-```text
-你 > 600519
-... 正在分析...
-  -> resolve_stock   600519
-     resolve_stock: 贵州茅台（600519）
-  -> get_stock_profile
-  -> get_price_snapshot
-  -> get_daily_bars
-  -> get_financial_factors
-  -> search_announcements
-  -> search_news
-
-╭────────────────────────────────────────────────────── 观点卡 ───╮
-│  贵州茅台（600519）  看多  置信：中                                   │
-│──────────────────────────────────────────────────────────────────│
-│  判断  茅 台+古 茅双品牌护城河深厚，估值进入合理区间                  │
-│  当前价  1453.96 元                                               │
-│  预期价位  1410–1520 元（1w）                                     │
-│──────────────────────────────────────────────────────────────────│
-│  核心驱动                                                          │
-│  • 双品牌战略+直营占比提升，现金流充裕                             │
-│  • 当前PE约25x，处于历史估值中枢偏下                               │
-│  • Q4 旺季动销预计环比改善                                        │
-│──────────────────────────────────────────────────────────────────│
-│  主要风险                                                          │
-│  • 飞天茅台批价波动影响渠道利润                                   │
-│  • 消费复苏节奏不及预期                                            │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-```text
-你 > 帮我看看半导体板块
-... 正在分析...
-  -> search_web     A股 半导体板块 最新动态 2026
-  -> get_hot_list   hot
-
-╭────────────────────────────────────────────────────── 观点卡 ───╮
-│  今日 A 股市场概况  中性  置信：低                                │
-│──────────────────────────────────────────────────────────────────│
-│  判断  半导体设备板块强势，AI算力需求持续                         │
-│──────────────────────────────────────────────────────────────────│
-│  热点方向                                                          │
-│  • 半导体设备：国产替代加速，订单饱满                            │
-│  • AI算力：光模块需求维持高位                                   │
-│  • 汽车电子：IGBT景气延续                                        │
-│──────────────────────────────────────────────────────────────────│
-│  主要分歧                                                          │
-│  • 消费电子复苏节奏不明，半导体周期底部仍需观察                   │
-└──────────────────────────────────────────────────────────────────┘
-```
+| 电脑端 — 个股分析 | 电脑端 — 板块分析 | 手机端 |
+|---|---|---|
+| ![](docs/screenshots/desktop_stock.png) | ![](docs/screenshots/desktop_sector.png) | ![](docs/screenshots/mobile.jpg) |
 
 ---
 
 ## 快速开始
 
-### 前置要求
-
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) 包管理器
-- Claude API Key（必须）
-- Tushare Token（推荐，用于行情和公告数据）
-
-### 安装
-
 ```bash
 git clone https://github.com/yangyuxin-hub/a-share-research-assistant.git
 cd a-share-research-assistant
 uv sync
+cp .env.example .env   # 填入 ANTHROPIC_API_KEY 和 TUSHARE_TOKEN
 ```
-
-### 配置
 
 ```bash
-cp .env.example .env
+uv run ashare chat          # 终端模式
+uv run ashare web           # 浏览器模式 http://localhost:7860
+uv run ashare check         # 检查配置
 ```
 
-编辑 `.env`：
-
-```env
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_BASE_URL=https://your-proxy.com   # 可选，使用中转时填写
-TUSHARE_TOKEN=your_tushare_token
-```
-
-完整配置项见下方[配置说明](#配置说明)。
-
-### 启动
-
-**终端 CLI 模式**
+**公网访问（Cloudflare Tunnel）**
 
 ```bash
-uv run ashare chat
-```
-
-**Web 浏览器模式**
-
-```bash
-uv run ashare web                    # 本地 http://localhost:7860
-uv run ashare web --port 8080        # 自定义端口
-uv run ashare web --host 0.0.0.0     # 局域网访问
-```
-
-**公网分享（通过 Cloudflare Tunnel）**
-
-```bash
-# 先启动 Web 服务
-uv run ashare web
-
-# 另开终端，用 cloudflared 暴露到公网
 cloudflared tunnel --url http://localhost:7860 --protocol http2
 ```
 
-退出：`Ctrl+C`
-
-### 检查配置
-
-```bash
-uv run ashare check
-```
-
 ---
 
-## 配置说明
+## 配置
 
-| 变量 | 说明 | 默认值 | 必需 |
-|---|---|---|---|
-| `ANTHROPIC_API_KEY` | Claude API 密钥 | — | 必须 |
-| `ANTHROPIC_BASE_URL` | 自定义 API 端点（中转） | — | 可选 |
-| `ANTHROPIC_MODEL` | 使用的模型 | `claude-sonnet-4-6` | 可选 |
-| `TUSHARE_TOKEN` | Tushare 行情数据 token（2000积分以上） | — | 推荐 |
-| `USE_AKSHARE_HOTLIST` | 启用 AKShare 热股发现 | `true` | 可选 |
-| `USE_CNINFO_PROVIDER` | 启用 CNINFO 公告数据源 | `true` | 可选 |
-| `LOG_LEVEL` | 日志级别 | `INFO` | 可选 |
-
----
-
-## 工具列表
-
-LLM 可调用的 8 个原子工具：
-
-| 工具 | 说明 | 数据来源 |
+| 变量 | 说明 | 必需 |
 |---|---|---|
-| `resolve_stock` | 股票代码/名称解析，模糊匹配候选标的 | Tushare / AKShare |
-| `get_stock_profile` | 公司基础资料：行业、市场、上市日期 | Tushare |
-| `get_price_snapshot` | 最新价格快照：现价、涨跌幅、换手率 | Tushare |
-| `get_daily_bars` | 历史日线行情（OHLCV），默认近 20 日 | Tushare |
-| `get_financial_factors` | 估值因子：PE/PB、市值、量比 | Tushare |
-| `search_announcements` | 近期公告搜索，默认近 30 天 | Tushare → AKShare 降级 |
-| `search_news` | 公司相关财经新闻，默认近 14 天 | AKShare |
-| `get_hot_list` | 今日热门/涨停/涨幅榜单 | AKShare → 网络搜索降级 |
-| `search_web` | 实时网络搜索：热点事件、板块动态、宏观政策 | DuckDuckGo (ddgs) |
-| `commit_opinion` | 分析完成后提交投研结论（触发输出） | — |
+| `ANTHROPIC_API_KEY` | Claude API 密钥 | 必须 |
+| `ANTHROPIC_BASE_URL` | 中转代理地址 | 可选 |
+| `ANTHROPIC_MODEL` | 模型，默认 `claude-sonnet-4-6` | 可选 |
+| `TUSHARE_TOKEN` | Tushare token（建议 ≥2000 积分） | 推荐 |
 
 ---
 
-## Skill 列表
+## 工具 & Skill
 
-系统根据意图自动选择 Skill，每个 Skill 决定可用工具集和 LLM 的分析框架：
+**10 个 LLM 工具**
 
-| Skill | 触发场景 | 可用工具 | 最大迭代 |
-|---|---|---|---|
-| **单股深度研究** | 输入股票代码或名称，未含快速查询词 | 全量 6 工具 + commit | 4 轮 |
-| **快速价格核查** | 含"多少钱/现价/今天涨跌"等关键词 | profile + snapshot + factors | 3 轮 |
-| **市场概览** | 问大盘、板块、宏观事件 | search_web + hot_list | 3 轮 |
-| **多股比较** | 同时提及 2 只以上股票 | 全量 6 工具 + commit | 5 轮 |
+| 工具 | 说明 |
+|---|---|
+| `resolve_stock` | 代码/名称解析 |
+| `get_stock_profile` | 公司基础资料 |
+| `get_price_snapshot` | 最新价格、涨跌幅 |
+| `get_daily_bars` | 历史日线行情（默认近 20 日） |
+| `get_financial_factors` | PE/PB、市值、量比 |
+| `search_announcements` | 近期公告（默认近 30 天） |
+| `search_news` | 财经新闻（默认近 14 天） |
+| `get_hot_list` | 热门/涨停/涨幅榜 |
+| `search_web` | 实时网络搜索 |
+| `commit_opinion` | 提交投研结论（触发输出） |
 
----
+**4 个 Skill（按意图自动选择）**
 
-## 数据源说明
-
-| 数据类型 | 主数据源 | 降级备用 | 说明 |
-|---|---|---|---|
-| 股票列表解析 | Tushare `stock_basic` | AKShare `stock_info_a_code_name` | 支持代码/名称模糊匹配 |
-| 实时价格 | Tushare `daily` | — | T+1，非实时 |
-| 估值因子 | Tushare `daily_basic` | — | PE/PB/市值/换手率/量比 |
-| 历史日线 | Tushare `daily` | — | OHLCV + 涨跌幅 |
-| 上市公司公告 | Tushare `stk_notices/anns` | AKShare `stock_notice_report` | Tushare 需 ≥2000 积分 |
-| 财经新闻 | AKShare `stock_news_em` | — | 东方财富新闻接口 |
-| 热门榜单 | AKShare `stock_hot_rank_em` | `stock_hot_up_em`（涨幅榜） | 网络问题时自动降级 |
-| 网络搜索 | DuckDuckGo `ddgs.news()` | `ddgs.text()`（无时间戳） | 返回真实发布时间 |
-
-> **数据质量说明**
->
-> 当前接入的数据源（Tushare 免费积分、AKShare、DuckDuckGo）存在以下局限：
->
-> - **实时性**：行情数据为 T+1 收盘价，无法获取盘中实时报价
-> - **准确性**：AKShare 和网络搜索结果来自第三方聚合，部分数据存在缺失或延迟
-> - **稳定性**：AKShare 依赖爬取东方财富等平台接口，可能受网络环境或对方限流影响
-> - **公告接口**：Tushare 公告 API 对积分有要求，低积分账户可能无法获取
->
-> **生产环境建议**：如需用于实盘辅助决策，应替换为 Wind、同花顺 iFinD、Bloomberg 等付费专业数据接口，以保障数据的实时性、完整性和可靠性。本项目的 Provider 层已做抽象，替换数据源只需实现对应的 Provider 接口即可。
+| Skill | 触发场景 |
+|---|---|
+| 单股深度研究 | 输入股票代码/名称 |
+| 快速价格核查 | 含"多少钱/现价/今天"等词 |
+| 市场概览 | 问大盘、板块、宏观事件 |
+| 多股比较 | 同时提及 2 只以上股票 |
 
 ---
 
-## 项目结构
+## 数据源
 
-```
-src/ashare_research_assistant/
-├── agents/
-│   ├── main_agent.py      # 统一 MainAgent（意图路由 + Agentic Loop 合一）
-│   ├── orchestrator.py    # Session 管理 + clarification 追问流程
-│   ├── tools.py           # 12 个工具定义 + ToolExecutor
-│   └── skills.py          # Skill prompt 模板
-├── cli/
-│   ├── main.py            # CLI 入口（chat / web / check 命令）
-│   ├── session.py         # CLI 会话循环
-│   └── renderer.py        # Rich 终端渲染
-├── web/
-│   ├── app.py             # Gradio Web 界面
-│   ├── server.py          # uvicorn 服务入口
-│   └── md_renderer.py     # Markdown 渲染工具
-├── config/
-│   └── settings.py        # Pydantic Settings 配置
-├── core/models/           # 统一 Pydantic Schema
-│   ├── opinion.py         # OpinionCard / ExpandedOpinionCard
-│   ├── trace.py           # TraceEvent / SessionStage
-│   └── session.py         # SessionState
-├── providers/             # 数据源抽象层
-│   ├── tushare/           # Tushare Pro（行情/因子）
-│   ├── cninfo/            # CNINFO 巨潮（公告，Tushare失败时降级AKShare）
-│   ├── akshare/           # AKShare（热股榜单/财经新闻）
-│   └── web_search_provider.py  # DuckDuckGo（网络搜索）
-└── services/
-    ├── trace_store.py         # JSONL 全链路记录
-    └── clarification_engine.py  # 结构化追问引擎
-```
+| 数据类型 | 主数据源 | 降级备用 |
+|---|---|---|
+| 行情 / 因子 / 日线 | Tushare Pro | — |
+| 上市公司公告 | Tushare anns | AKShare stock_notice_report |
+| 财经新闻 | AKShare stock_news_em | — |
+| 热门榜单 | AKShare stock_hot_rank_em | stock_hot_up_em |
+| 网络搜索 | DuckDuckGo ddgs.news() | ddgs.text() |
 
----
-
-## 开发
-
-```bash
-# 运行测试
-uv run pytest
-
-# 查看 trace 日志
-cat .local/trace.jsonl | python -m json.tool | less
-
-# Web 开发模式（代码改动自动重载）
-uv run ashare web --reload --log-level debug
-```
+> **注意**：当前数据源为免费/爬取接口，行情为 T+1 非实时，稳定性和准确性有限。生产环境建议替换为 Wind、同花顺 iFinD 等付费接口，Provider 层已做抽象，接口替换成本低。
 
 ---
 
 ## 免责声明
 
-本工具仅供个人学习和研究使用，输出内容不构成任何投资建议。市场有风险，投资需谨慎。
+本工具仅供个人学习研究，输出内容不构成投资建议。市场有风险，投资需谨慎。
