@@ -30,7 +30,7 @@ def chat(
     from ashare_research_assistant.cli.session import CLISession
 
     if not settings.anthropic_api_key:
-        console.print("[bold red]错误：请在 .env 中配置 ASHARE_API_KEY[/bold red]")
+        console.print("[bold red]错误：请在 .env 中配置 ANTHROPIC_API_KEY[/bold red]")
         raise typer.Exit(1)
 
     if not settings.tushare_token and not settings.use_akshare_hotlist:
@@ -60,7 +60,7 @@ def web(
     from ashare_research_assistant.config.settings import settings
 
     if not settings.anthropic_api_key:
-        console.print("[bold red]错误：请在 .env 中配置 ASHARE_API_KEY[/bold red]")
+        console.print("[bold red]错误：请在 .env 中配置 ANTHROPIC_API_KEY[/bold red]")
         raise typer.Exit(1)
 
     try:
@@ -93,7 +93,7 @@ def check() -> None:
     from ashare_research_assistant.config.settings import settings
 
     console.print("[bold]配置检查[/bold]")
-    console.print(f"  ASHARE_API_KEY:    {'[green]OK 已配置[/green]' if settings.anthropic_api_key else '[red]NO 未配置[/red]'}")
+    console.print(f"  ANTHROPIC_API_KEY: {'[green]OK 已配置[/green]' if settings.anthropic_api_key else '[red]NO 未配置[/red]'}")
     console.print(f"  TUSHARE_TOKEN:     {'[green]OK 已配置[/green]' if settings.tushare_token else '[red]NO 未配置[/red]'}")
     console.print(f"  APP_ENV:           {settings.app_env}")
     console.print(f"  MODEL:             {settings.anthropic_model}")

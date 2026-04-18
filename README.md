@@ -48,7 +48,7 @@ cloudflared tunnel --url http://localhost:7860 --protocol http2
 
 ## 工具 & Skill
 
-**10 个 LLM 工具**
+**12 个 LLM 工具**
 
 | 工具 | 说明 |
 |---|---|
@@ -61,7 +61,9 @@ cloudflared tunnel --url http://localhost:7860 --protocol http2
 | `search_news` | 财经新闻（默认近 14 天） |
 | `get_hot_list` | 热门/涨停/涨幅榜 |
 | `search_web` | 实时网络搜索 |
-| `commit_opinion` | 提交投研结论（触发输出） |
+| `commit_opinion` | 提交投研结论 |
+| `commit_answer` | 直接提交文字回答（知识/问候） |
+| `commit_clarification` | 提交追问请求 |
 
 **4 个 Skill（按意图自动选择）**
 
@@ -90,6 +92,11 @@ cloudflared tunnel --url http://localhost:7860 --protocol http2
 
 ## 系统架构
 
+![系统架构图](architecture_diagram.jpeg)
+
+<details>
+<summary>点击展开 ASCII 版本</summary>
+
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                      入口层 Entry                        │
@@ -105,50 +112,36 @@ cloudflared tunnel --url http://localhost:7860 --protocol http2
                         │ anthropic.messages.create(tools=…)
 ┌───────────────────────▼─────────────────────────────────┐
 │                  Agent 层 MainAgent                       │
-│                                                          │
 │  ┌──────────────────────────────────────────────────┐   │
 │  │              Agentic Loop（max 8 轮）             │   │
 │  │  LLM 推理 → tool_use_blocks → 执行 → 追加消息   │   │
 │  │  终止条件：commit_opinion / commit_answer /       │   │
 │  │            commit_clarification / 迭代上限        │   │
 │  └──────────────────────────────────────────────────┘   │
-│                                                          │
 │  System Prompt（行为规范）  ×  工具 description（选择依据）│
-│  无独立意图识别层 — 模型单次推理自主决策                  │
 └───────────────────────┬─────────────────────────────────┘
                         │ ToolExecutor.execute(name, input)
 ┌───────────────────────▼─────────────────────────────────┐
 │                   工具层 Tool / Skill                     │
-│                                                          │
-│  11 个工具 Schema（LLM 可见）                            │
+│  12 个工具 Schema（LLM 可见）                            │
 │    resolve_stock · get_stock_profile · get_price_snapshot│
 │    get_daily_bars · get_financial_factors                 │
 │    search_announcements · search_news · get_hot_list     │
-│    search_web · commit_opinion · commit_answer           │
-│                                                          │
-│  4 个 Skill（system_prompt + 工具子集 + max_iterations） │
-│    单股深度研究 / 快速价格核查 / 市场概览 / 多股比较      │
+│    search_web · commit_opinion · commit_answer            │
+│    commit_clarification                                  │
+│  4 个 Skill（单股深度/快速核查/市场概览/多股比较）     │
 └───────────────────────┬─────────────────────────────────┘
                         │ Provider 接口（ABC）
 ┌───────────────────────▼─────────────────────────────────┐
-│                  Provider 层（可替换）                    │
-│                                                          │
-│  MarketDataProvider ←── TushareMarketDataProvider        │
-│  AnnouncementProvider ← CninfoAnnouncementProvider       │
-│  NewsProvider ────────← AKShareNewsProvider              │
-│  HotlistProvider ─────← AKShareHotlistProvider           │
-│  WebSearchProvider ───← DuckDuckGo（ddgs）               │
-│                                                          │
-│  Agent 层只依赖抽象接口，替换为 Wind / iFinD 无需改上层  │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-┌───────────────────────▼─────────────────────────────────┐
-│                  服务层 Services                          │
-│  TraceStore（JSONL 本地持久化，按 turn_id 检索）          │
-│  ProfileStore（用户记忆 JSON，跨会话保留偏好）            │
-│  ClarificationEngine（结构化追问生成）                    │
+│  MarketDataProvider ← TushareMarketDataProvider          │
+│  AnnouncementProvider ← CninfoAnnouncementProvider        │
+│  NewsProvider ← AKShareNewsProvider                      │
+│  HotlistProvider ← AKShareHotlistProvider                │
+│  WebSearchProvider ← DuckDuckGo（ddgs）               │
 └─────────────────────────────────────────────────────────┘
 ```
+
+</details>
 
 **核心设计决策**
 

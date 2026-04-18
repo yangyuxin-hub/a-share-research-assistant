@@ -12,13 +12,11 @@
 
 import json
 import logging
-import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 import anthropic
-from anthropic.types import TextBlock
 
 from ashare_research_assistant.core.models import (
     AnalysisWindow,
@@ -55,20 +53,6 @@ from ashare_research_assistant.services.trace_store import TraceStore
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
-_DIRECT_ANSWER_KEYWORDS = (
-    "你好", "您好", "hi", "hello", "hey", "hi,",
-    "你是谁", "你能做什么", "有什么用", "介绍一下", "怎么用",
-    "pe是什么", "pb是什么", "eps是什么", "roe是什么", "是什么意思",
-    "macd", "金叉", "死叉", "kdj", "boll", "术语",
-    "涨跌停", "停牌", "st", "退市",
-    "问候", "早安", "晚安", "你好呀",
-)
-
-# 这些词出现 → 快速查询（不是直接回答，但触发 resolve_stock → get_price_snapshot 路径）
-_QUICK_QUERY_PATTERNS = (
-    "多少钱", "现价", "今天价格", "现在价格", "当前价",
-    "今天涨", "今天跌", "今日涨跌",
-)
 
 
 def _now_iso() -> str:
@@ -256,79 +240,54 @@ ALL_TOOLS = [
 
 _SYSTEM_PROMPT = """你是 A 股投研助手，一个专注于 A 股市场的量化投研 Copilot。
 
-你的能力：单股深度分析（行情+公告+新闻→观点卡）、板块/主题探索、热股发现、大盘询问、投研知识解释。
+能力范围：单股深度分析（行情+公告+新闻→观点卡）、板块/主题探索、热股发现、大盘询问、投研知识解释。
 全程用中文回答。风格简洁、克制，不废话，不重复用户的话。
 
 ---
 
-## 核心决策规则
+## 工具说明
 
-### 第一步：判断是否需要调用工具
+**resolve_stock**
+任何涉及具体股票名称、简称、代码时，第一步必须调用此工具获取真实代码。
+- 返回 1 个候选 → 继续调用数据工具
+- 返回多个候选 → 调用 commit_clarification 让用户选一只
+- 返回空 → 可能是主题词/概念词，用 search_web 或 commit_answer 处理
 
-**直接回答（不调用工具）**：
-- 问候、闲聊：你好、您好、早安、hi
-- 询问身份/能力：你是谁、你能做什么、怎么用
-- 术语/概念解释：PE是什么、MACD金叉是什么
-- 以上情况请调用 commit_answer 提交回答。
+**行情/财务工具**（在 resolve_stock 后使用，单股分析时全部调用）
+- get_stock_profile：公司基础资料
+- get_price_snapshot：当前价格快照
+- get_daily_bars：历史日线，判断趋势
+- get_financial_factors：PE/PB/市值等估值因子
+- search_announcements：近30天公告
+- search_news：近14天新闻
 
-**必须调用 resolve_stock（第一步）**：
-- 用户输入包含任何股票名称、简称、代码时，先调用 resolve_stock 获取真实代码。
-- 常见表述：茅台、平安、这只股、那支股票、帮我看看 XXX
-- 如果输入为 6 位数字代码（如 600519），**直接用该代码调用 resolve_stock**。
-
-resolve_stock 返回候选列表后，再决定下一步：
-- **1个候选** → 继续调用 get_stock_profile / get_price_snapshot 等数据工具
-- **多个候选** → 调用 commit_clarification 让用户选一只
-- **空结果** → 可能是主题词或概念词，调用 search_web 或 commit_answer
-
-**无需 resolve_stock、直接搜索**：
-- 大盘行情、宏观事件、政策影响（如"特朗普关税对A股影响"）→ search_web → commit_answer
-- 今日热门股/涨停股 → get_hot_list → commit_answer
-- 探索板块/概念股名单（如"英伟达产业链"、"AI算力板块有哪些股"）→ search_web（1-2次）→ **必须调用 commit_answer** 提交结果，不要直接输出文字
-
----
-
-## 工具使用指南
-
-### resolve_stock
-先调用此工具获取真实股票代码，再调用数据工具。**任何涉及具体股票的请求，第一步永远是 resolve_stock。**
-
-### 行情/财务工具（resolve_stock 后使用）
-- get_stock_profile：公司基础资料，必调
-- get_price_snapshot：当前价格快照，必调
-- get_daily_bars：历史日线，判断趋势，必调
-- get_financial_factors：PE/PB/市值等估值因子，必调
-- search_announcements：近30天公告，必调
-- search_news：近14天新闻，必调
-
-### 市场概览工具（无需 resolve_stock）
-- search_web：实时网络搜索，搜索词要包含具体事件+A股关键词
+**市场概览工具**（无需 resolve_stock）
+- search_web：实时网络搜索，搜索词包含具体事件+A股关键词
 - get_hot_list：今日热门/涨停榜单
 
-### 提交工具
-- commit_opinion：完成数据收集后，提交完整投研观点
-- commit_answer：纯知识/闲聊，直接提交文字回答
-- commit_clarification：需要追问时提交问题
+**提交工具**（每次对话必须以其中一个结束）
+- commit_opinion：完成数据收集后，提交完整投研观点卡
+- commit_answer：知识解释、问候、大盘/主题类回答，直接提交文字
+- commit_clarification：输入有歧义或意图不明，提交追问
 
 ---
 
-## 分析框架（调用完数据工具后）
+## 分析框架（数据收集完成后）
 
 - **交易视角**：催化剂和预期差
 - **估值视角**：PE/PB 相对历史和同业
 - **事件视角**：近期公告/新闻关键信息
 - **技术视角**：量价趋势
 
-价格目标（price_target）基于近期压力/支撑位估算，要有逻辑支撑。
-数据缺失时，在对应字段留空，并在 thesis 中注明。
+价格目标基于近期压力/支撑位估算，须有逻辑支撑。数据缺失时在对应字段留空并在 thesis 中注明。
 
 ## commit_clarification 使用规范
 
-| clarification_type | 适用场景 | question 示例 |
-|---|---|---|
-| symbol_disambiguation | 多只股票候选 | "找到多只相关股票，请确认您想分析哪一只：XXX" |
-| goal_clarification | 意图不明确 | "您是想了解某只具体股票，还是想探索某个板块？" |
-| theme_exploration | 主题探索无标的 | "您想深入了解哪个主题板块？" |
+| clarification_type | 适用场景 |
+|---|---|
+| symbol_disambiguation | resolve_stock 返回多只候选 |
+| goal_clarification | 意图不明确，无法判断用户想做什么 |
+| theme_exploration | 主题探索但需要具体标的 |
 
 候选列表放在 candidates 字段，格式：[{"symbol":"600519","name":"贵州茅台"},...]
 """
@@ -367,13 +326,6 @@ class MainAgent:
         progress_cb: Optional[Callable[[str, str], None]] = None,
     ) -> SessionState:
         """主入口：一次 agentic loop，返回填充后的 SessionState。"""
-        user_input = state.user_input
-
-        # 快速判断：是否直接回答（无工具）
-        if self._is_direct_answer(user_input):
-            return self._direct_answer(state, user_input)
-
-        # Agentic Loop
         return self._agentic_loop(state, progress_cb=progress_cb)
 
     # ── Agentic Loop ───────────────────────────────────────────────────────────
@@ -520,9 +472,6 @@ class MainAgent:
                 f"MainAgent 超过迭代次数，用已有价格数据构造回答：{answer_text}"
             )
             return self._build_direct_answer_state(state, {"text": answer_text})
-
-        logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}")
-        return self._degraded(state, f"超过最大迭代次数 {MAX_ITERATIONS}")
 
         logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}")
         return self._degraded(state, f"超过最大迭代次数 {MAX_ITERATIONS}")
@@ -705,64 +654,6 @@ class MainAgent:
                                   f"{card.stance_label} | {card.one_liner}"))
         self._trace_store.append_many(state.trace)
         return state
-
-    # ── 直接回答 ───────────────────────────────────────────────────────────────
-
-    def _direct_answer(self, state: SessionState, user_input: str) -> SessionState:
-        """纯知识/闲聊/概念解释，不调用任何数据工具。"""
-        system_text = (
-            "You are A股投研助手, a professional Chinese A-share market research assistant. "
-            "Your name is A股投研助手. You are NOT Claude, NOT made by Anthropic, "
-            "and you have no other identity or persona. "
-            "Always respond in Chinese (中文). "
-            "Be concise and professional. "
-            "If greeting: introduce yourself as A股投研助手 and briefly describe your capabilities "
-            "(stock analysis, sector exploration, market overview, investment knowledge). "
-            "If asking about terminology/concepts: explain in plain, accessible Chinese."
-        )
-        try:
-            response = self._client.messages.create(
-                model=self._model,
-                max_tokens=512,
-                system=[TextBlock(type="text", text=system_text)],
-                messages=list(state.conversation_history) + [{"role": "user", "content": user_input}],
-            )
-        except Exception as e:
-            logger.error(f"_direct_answer LLM 调用失败: {e}")
-            return self._degraded(state, f"回答生成失败：{e}")
-
-        text = "".join(block.text for block in response.content if hasattr(block, "text"))
-        return self._build_direct_answer_state(state, {"text": text})
-
-    def _is_direct_answer(self, user_input: str) -> bool:
-        """判断是否无需工具、直接回答。"""
-        text = user_input.strip().lower()
-        for kw in _DIRECT_ANSWER_KEYWORDS:
-            if kw in text:
-                return True
-        # 问号结尾 + 明显是概念类问题
-        if user_input.strip().endswith("？") or user_input.strip().endswith("?"):
-            text_content = user_input.strip()[:-1].lower()
-            concept_words = ("是什么", "什么意思", "如何", "怎样", "哪个", "哪些")
-            if any(w in text_content for w in concept_words):
-                # 排除明显是股票名的问题
-                if not self._contains_stock_mention(user_input):
-                    return True
-        return False
-
-    def _contains_stock_mention(self, text: str) -> bool:
-        """简单启发式：包含 6 位数字或 2-5 字中文词（可能是股票名）。"""
-        if re.search(r"\b[036]\d{5}\b", text):
-            return True
-        # 常见投研词汇（不是股票名）
-        non_stock = {"pe", "pb", "eps", "roe", "毛利率", "净利率", "营收", "利润",
-                     "资产负债", "现金流", "股价", "涨跌", "大盘", "指数", "板块",
-                     "北向", "主力", "庄家", "筹码", "均线", "macd", "kdj", "boll"}
-        text_lower = text.lower()
-        for w in non_stock:
-            if w in text_lower:
-                return False
-        return bool(re.search(r"[\u4e00-\u9fff]{2,5}", text))
 
     # ── 降级 ──────────────────────────────────────────────────────────────────
 

@@ -1,20 +1,34 @@
-"""Skill 定义层。
+"""Skill 定义层 + 注册。
 
 每个 Skill 是一个完整的分析任务单元，包含：
-- system_prompt：LLM 的角色、任务边界、分析框架、风格要求
-- tools：该 Skill 可用的工具集（commit_opinion 统一追加）
-- max_iterations：agentic loop 最大轮数
+- name          : 唯一标识
+- tool_names    : 该 Skill 可用的工具名称列表（从 tool_registry 取 schema）
+- system_prompt : LLM 的角色、任务边界、分析框架、风格要求
+- max_iterations: agentic loop 最大轮数
 
-Skill 选择逻辑：select_skill(intent_type) → Skill
+架构变化（v2）：
+- Skill.tool_names 替代原来的 Skill.tools（list[dict]），解耦 schema 嵌入
+- Skill.tools / Skill.tools_with_commit 变为属性，从 tool_registry 懒取
+- 所有 Skill 通过 skill_registry.register() 自注册
+- 新增 Skill = 实例化 + 调 skill_registry.register()，不改已有代码
+
+新增 Skill 示例：
+    MY_SKILL = Skill(
+        name="my_skill",
+        tool_names=["get_stock_profile", "search_web"],
+        system_prompt="你是...",
+        max_iterations=3,
+    )
+    skill_registry.register(MY_SKILL, intents=["my_intent"])
 """
 
 from dataclasses import dataclass, field
 
+from ashare_research_assistant.agents.skill_registry import skill_registry
 from ashare_research_assistant.agents.tools import (
-    TOOL_COMMIT_OPINION,
-    TOOLS_FULL_RESEARCH,
-    TOOLS_MARKET_OVERVIEW,
-    TOOLS_QUICK_CHECK,
+    TOOLS_FULL_RESEARCH_NAMES,
+    TOOLS_MARKET_OVERVIEW_NAMES,
+    TOOLS_QUICK_CHECK_NAMES,
 )
 from ashare_research_assistant.core.models import IntentType
 
@@ -22,14 +36,21 @@ from ashare_research_assistant.core.models import IntentType
 @dataclass
 class Skill:
     name: str
+    tool_names: list[str]          # 工具名称列表，schema 从 tool_registry 懒取
     system_prompt: str
-    tools: list[dict]           # 不含 commit_opinion，由此处统一追加
     max_iterations: int = 10
 
     @property
+    def tools(self) -> list[dict]:
+        """当前 Skill 可用的工具 schema 列表（不含 commit_opinion）。"""
+        from ashare_research_assistant.agents.tool_registry import tool_registry
+        return tool_registry.get_schemas(self.tool_names)
+
+    @property
     def tools_with_commit(self) -> list[dict]:
-        """返回含 commit_opinion 的完整工具列表。"""
-        return self.tools + [TOOL_COMMIT_OPINION]
+        """含 commit_opinion 的完整工具列表（供 agentic loop 使用）。"""
+        from ashare_research_assistant.agents.tool_registry import tool_registry
+        return tool_registry.get_schemas(self.tool_names + ["commit_opinion"])
 
 
 # ── Skill: 单股深度研究 ───────────────────────────────────────────────────────
@@ -37,7 +58,7 @@ class Skill:
 SKILL_SINGLE_STOCK = Skill(
     name="single_stock_deep_dive",
     max_iterations=4,
-    tools=TOOLS_FULL_RESEARCH,
+    tool_names=TOOLS_FULL_RESEARCH_NAMES,
     system_prompt="""你是 A 股中短线事件驱动投研分析师。
 
 ## 任务
@@ -70,7 +91,7 @@ get_financial_factors、search_announcements、search_news 这 6 个工具调用
 SKILL_QUICK_CHECK = Skill(
     name="quick_price_check",
     max_iterations=3,
-    tools=TOOLS_QUICK_CHECK,
+    tool_names=TOOLS_QUICK_CHECK_NAMES,
     system_prompt="""你是 A 股投研助手的快速查询模块。
 
 ## 任务
@@ -90,7 +111,7 @@ SKILL_QUICK_CHECK = Skill(
 SKILL_MARKET_OVERVIEW = Skill(
     name="general_market_overview",
     max_iterations=3,
-    tools=TOOLS_MARKET_OVERVIEW,
+    tool_names=TOOLS_MARKET_OVERVIEW_NAMES,
     system_prompt="""你是 A 股投研助手的市场概览模块。
 
 ## 任务
@@ -125,7 +146,7 @@ SKILL_MARKET_OVERVIEW = Skill(
 SKILL_COMPARE = Skill(
     name="compare_stocks",
     max_iterations=5,
-    tools=TOOLS_FULL_RESEARCH,
+    tool_names=TOOLS_FULL_RESEARCH_NAMES,
     system_prompt="""你是 A 股投研助手的比较分析模块。
 
 ## 任务
@@ -148,19 +169,33 @@ SKILL_COMPARE = Skill(
 )
 
 
-# ── Skill 选择 ────────────────────────────────────────────────────────────────
+# ── Skill 注册 ────────────────────────────────────────────────────────────────
+# 意图 → skill 的映射在这里统一声明。
+# 新增 Skill：实例化后调 skill_registry.register()，无需改 select_skill()。
 
-_INTENT_TO_SKILL: dict[str, Skill] = {
-    "single_stock_analysis": SKILL_SINGLE_STOCK,
-    "stock_compare_or_followup": SKILL_COMPARE,
-    "hot_candidate_discovery": SKILL_MARKET_OVERVIEW,
-    "theme_or_topic_exploration": SKILL_SINGLE_STOCK,   # 主题探索最终会落到具体标的
-    "general_market_question": SKILL_MARKET_OVERVIEW,
-    "clarification_required": SKILL_MARKET_OVERVIEW,   # 兜底
-}
+skill_registry.register(
+    SKILL_SINGLE_STOCK,
+    intents=["single_stock_analysis", "theme_or_topic_exploration"],
+)
 
-_SINGLE_STOCK_QUICK_KEYWORDS = ("价格", "现价", "多少钱", "涨跌", "今天", "现在")
+skill_registry.register(
+    SKILL_QUICK_CHECK,
+    is_quick_check=True,  # 单股意图 + 快速关键词时自动路由到此
+)
 
+skill_registry.register(
+    SKILL_MARKET_OVERVIEW,
+    intents=["hot_candidate_discovery", "general_market_question", "clarification_required"],
+    is_default=True,  # 无匹配意图时的兜底
+)
+
+skill_registry.register(
+    SKILL_COMPARE,
+    intents=["stock_compare_or_followup"],
+)
+
+
+# ── select_skill（向后兼容）───────────────────────────────────────────────────
 
 def select_skill(
     intent_type: IntentType,
@@ -169,19 +204,6 @@ def select_skill(
 ) -> Skill:
     """根据意图类型和上下文选择合适的 Skill。
 
-    Args:
-        intent_type: RouterAgent 识别的意图
-        user_input: 原始用户输入，用于关键词判断
-        entity_count: 解析到的股票数量
+    委托给 skill_registry.select()，保持接口不变。
     """
-    # 比较意图且有多只股票
-    if intent_type == "stock_compare_or_followup" and entity_count >= 2:
-        return SKILL_COMPARE
-
-    # 单股意图 + 快速查询关键词 → 不走深度研究
-    if intent_type == "single_stock_analysis":
-        if any(kw in user_input for kw in _SINGLE_STOCK_QUICK_KEYWORDS):
-            return SKILL_QUICK_CHECK
-        return SKILL_SINGLE_STOCK
-
-    return _INTENT_TO_SKILL.get(intent_type, SKILL_MARKET_OVERVIEW)
+    return skill_registry.select(intent_type, user_input, entity_count)

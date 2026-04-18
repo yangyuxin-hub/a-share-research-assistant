@@ -18,11 +18,7 @@ import gradio as gr
 from ashare_research_assistant.config.settings import settings
 from ashare_research_assistant.core.models import SessionState
 from ashare_research_assistant.agents.orchestrator import Orchestrator
-from ashare_research_assistant.providers.tushare import TushareMarketDataProvider
-from ashare_research_assistant.providers.cninfo import CninfoAnnouncementProvider
-from ashare_research_assistant.providers.akshare import AKShareNewsProvider
-from ashare_research_assistant.providers.akshare.hotlist_provider import AKShareHotlistProvider
-from ashare_research_assistant.providers.web_search_provider import WebSearchProvider
+from ashare_research_assistant.providers import ProviderContainer
 from ashare_research_assistant.services.clarification_engine import ClarificationEngine
 from ashare_research_assistant.services.trace_store import TraceStore
 from ashare_research_assistant.web import md_renderer
@@ -50,6 +46,15 @@ def _now_iso() -> str:
 
 # ── 全局 Orchestrator（无状态，所有 session 共享）────────────────────────────
 _orchestrator: Optional[Orchestrator] = None
+_provider_container: Optional[ProviderContainer] = None
+
+
+def _get_provider_container() -> ProviderContainer:
+    """懒加载 ProviderContainer 单例。替换数据源只需改 providers/container.py。"""
+    global _provider_container
+    if _provider_container is None:
+        _provider_container = ProviderContainer(settings)
+    return _provider_container
 
 
 def _get_orchestrator() -> Orchestrator:
@@ -59,20 +64,16 @@ def _get_orchestrator() -> Orchestrator:
             api_key=settings.anthropic_api_key,
             **({"base_url": settings.anthropic_base_url} if settings.anthropic_base_url else {}),
         )
-        market = TushareMarketDataProvider(token=settings.tushare_token)
-        ann = CninfoAnnouncementProvider(token=settings.tushare_token or None)
-        news = AKShareNewsProvider()
-        web_search = WebSearchProvider()
-        hotlist = AKShareHotlistProvider()
+        container = _get_provider_container()
         _orchestrator = Orchestrator(
-            market_data_provider=market,
-            announcement_provider=ann,
-            news_provider=news,
+            market_data_provider=container.market,
+            announcement_provider=container.announcement,
+            news_provider=container.news,
             anthropic_client=client,
             clarification_engine=ClarificationEngine(),
             trace_store=TraceStore(path=settings.trace_store_path),
-            web_search=web_search,
-            hotlist_provider=hotlist,
+            web_search=container.web_search,
+            hotlist_provider=container.hotlist,
         )
         logger.info("Orchestrator 初始化完成")
     return _orchestrator
