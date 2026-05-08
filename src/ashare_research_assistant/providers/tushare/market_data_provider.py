@@ -193,6 +193,8 @@ class TushareMarketDataProvider(MarketDataProvider):
         )
 
     def get_stock_profile(self, symbol: str) -> Optional[StockProfile]:
+        if self._pro is None:
+            return None
         ts_code = self._to_ts_code(symbol)
         if not ts_code:
             return None
@@ -217,6 +219,8 @@ class TushareMarketDataProvider(MarketDataProvider):
             return None
 
     def get_price_snapshot(self, symbol: str) -> Optional[PriceSnapshot]:
+        if self._pro is None:
+            return None
         ts_code = self._to_ts_code(symbol)
         if not ts_code:
             return None
@@ -266,6 +270,8 @@ class TushareMarketDataProvider(MarketDataProvider):
         start_date: str,
         end_date: str,
     ) -> list[DailyBar]:
+        if self._pro is None:
+            return []
         ts_code = self._to_ts_code(symbol)
         if not ts_code:
             return []
@@ -305,6 +311,8 @@ class TushareMarketDataProvider(MarketDataProvider):
         start_date: str,
         end_date: str,
     ) -> list[DailyFactor]:
+        if self._pro is None:
+            return []
         ts_code = self._to_ts_code(symbol)
         if not ts_code:
             return []
