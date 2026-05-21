@@ -122,7 +122,8 @@ def build_demo() -> gr.Blocks:
             height=560,
             show_label=False,
             render_markdown=True,
-            type="messages",
+            sanitize_html=False,
+            group_consecutive_messages=False,
         )
 
         with gr.Row():
