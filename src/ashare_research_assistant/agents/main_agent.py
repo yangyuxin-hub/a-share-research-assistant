@@ -415,6 +415,20 @@ core_drivers、key_risks、watch_points、evidence_chain 中的每条内容都�
 """
 
 
+def _build_system_prompt() -> str:
+    """在常量 system prompt 前注入今日日期，避免 LLM 用训练时的旧年份构造搜索词。"""
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()]
+    header = (
+        f"## 当前时间\n"
+        f"今天是 **{today}（{weekday}）**。涉及"
+        f"`search_web` / `search_news` / `search_announcements` 等检索类工具时，"
+        f"搜索词中的年份/日期必须基于今天，不要默认使用训练时的旧年份。\n\n---\n\n"
+    )
+    return header + _SYSTEM_PROMPT
+
+
 # ── Main Agent ────────────────────────────────────────────────────────────────
 
 class MainAgent:
@@ -478,6 +492,7 @@ class MainAgent:
         user_input = state.user_input
         messages: list[dict] = list(state.conversation_history)
         messages.append({"role": "user", "content": user_input})
+        system_prompt = _build_system_prompt()
 
         for iteration in range(MAX_ITERATIONS):
             response = None
@@ -486,7 +501,7 @@ class MainAgent:
                     response = self._client.messages.create(
                         model=self._model,
                         max_tokens=MAX_RESPONSE_TOKENS,
-                        system=_SYSTEM_PROMPT,
+                        system=system_prompt,
                         tools=ALL_TOOLS,
                         tool_choice={"type": "any"},
                         messages=messages,
