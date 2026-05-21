@@ -12,6 +12,7 @@
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -25,12 +26,14 @@ from ashare_research_assistant.core.models import (
     EvidenceChainItem,
     EvaluationResult,
     ExpandedOpinionCard,
+    FactSourceItem,
     OpinionCard,
     PriceTarget,
     SessionState,
     StockIdentifier,
     StockResearchDraft,
     TraceEvent,
+    UsageStats,
 )
 from ashare_research_assistant.agents.tools import (
     TOOL_GET_STOCK_PROFILE,
@@ -48,11 +51,13 @@ from ashare_research_assistant.providers.base import (
     MarketDataProvider,
     NewsProvider,
 )
+from ashare_research_assistant.config.settings import settings
 from ashare_research_assistant.services.trace_store import TraceStore
 
 logger = logging.getLogger(__name__)
 
 MAX_ITERATIONS = 8
+MAX_RESPONSE_TOKENS = 4096
 
 
 def _now_iso() -> str:
@@ -68,6 +73,109 @@ def _trace(state: SessionState, actor: str, action: str, summary: str) -> TraceE
         summary=summary,
         created_at=_now_iso(),
     )
+
+
+def _coerce_textual_tool_value(value: str):
+    value = value.strip()
+    if not value:
+        return ""
+    if value[0] in "[{\"" or value in ("null", "true", "false"):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return value
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", value):
+        return float(value) if "." in value else int(value)
+    return value
+
+
+def _ensure_string_list(value) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parsed = _coerce_textual_tool_value(value)
+        if parsed is value:
+            return [value] if value.strip() else []
+        value = parsed
+    if isinstance(value, list):
+        return [str(item) for item in value if item is not None and str(item).strip()]
+    return [str(value)]
+
+
+def _ensure_dict_list(value) -> list[dict]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parsed = _coerce_textual_tool_value(value)
+        value = parsed if parsed is not value else []
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _optional_float(value) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_fact_sources(fact_sources: Optional[list[dict]]) -> list[FactSourceItem]:
+    normalized = []
+    for item in (fact_sources or [])[:20]:
+        try:
+            normalized.append(FactSourceItem.model_validate(item))
+        except Exception:
+            logger.debug("忽略非法来源记录：%s", item)
+    return normalized
+
+
+def _usage_value(usage, name: str) -> int:
+    value = getattr(usage, name, 0) if usage is not None else 0
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _record_response_usage(usage_acc: dict, response) -> None:
+    usage = getattr(response, "usage", None)
+    usage_acc["llm_calls"] = usage_acc.get("llm_calls", 0) + 1
+    usage_acc["input_tokens"] = usage_acc.get("input_tokens", 0) + _usage_value(usage, "input_tokens")
+    usage_acc["output_tokens"] = usage_acc.get("output_tokens", 0) + _usage_value(usage, "output_tokens")
+    usage_acc["cache_creation_input_tokens"] = (
+        usage_acc.get("cache_creation_input_tokens", 0)
+        + _usage_value(usage, "cache_creation_input_tokens")
+    )
+    usage_acc["cache_read_input_tokens"] = (
+        usage_acc.get("cache_read_input_tokens", 0)
+        + _usage_value(usage, "cache_read_input_tokens")
+    )
+
+
+def _parse_textual_tool_call(text: str) -> Optional[tuple[str, dict]]:
+    """Parse proxy/model-emitted XML-like tool calls from plain text.
+
+    Some Anthropic-compatible gateways return tool calls as text like
+    <tool_call><function=commit_opinion>... instead of structured tool_use blocks.
+    Treat those as tool calls so they do not leak into the UI as raw HTML.
+    """
+    if "<function=" not in text:
+        return None
+    match = re.search(r"<function=([A-Za-z_][\w]*)>", text)
+    if not match:
+        return None
+    name = match.group(1)
+    params: dict = {}
+    for param, value in re.findall(
+        r"<parameter=([A-Za-z_][\w]*)>(.*?)</parameter>",
+        text,
+        flags=re.DOTALL,
+    ):
+        params[param] = _coerce_textual_tool_value(value)
+    return name, params
 
 
 # ── 工具定义 ──────────────────────────────────────────────────────────────────
@@ -180,7 +288,18 @@ TOOL_COMMIT_ANSWER = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "text": {"type": "string", "description": "直接回答用户的文字内容"},
+            "text": {
+                "type": "string",
+                "description": (
+                    "回答正文，使用 Markdown 排版。规范：\n"
+                    "1) 首句用 `> **一句话定义**` 引用块给出最核心结论；\n"
+                    "2) 分类/枚举一律用 `- **术语**：解释` 的形式，禁止把多条信息堆成连续段落；\n"
+                    "3) 关键术语、公式结果、阈值数值用 `**加粗**`；\n"
+                    "4) 子主题用 `**计算公式**` / `**含义**` / `**常见分类**` 一行加粗代替 ### 标题；\n"
+                    "5) 风险提示/反直觉点用 `> ⚠️ ...` 引用块单独成段；\n"
+                    "6) 内容紧凑、克制，不要寒暄、不要重复用户问题。"
+                ),
+            },
         },
         "required": ["text"],
     },
@@ -280,6 +399,9 @@ _SYSTEM_PROMPT = """你是 A 股投研助手，一个专注于 A 股市场的量
 - **技术视角**：量价趋势
 
 价格目标基于近期压力/支撑位估算，须有逻辑支撑。数据缺失时在对应字段留空并在 thesis 中注明。
+所有事实判断必须来自已调用工具返回的信息；无法从工具结果确认的内容，不要写成事实。
+公告、新闻、行情、估值数据不足时，应在 thesis、core_drivers 或 key_risks 中明确标注“数据不足/未检索到”。
+core_drivers、key_risks、watch_points、evidence_chain 中的每条内容都应能回溯到工具结果中的行情、财务、公告或新闻信息。
 
 ## commit_clarification 使用规范
 
@@ -305,7 +427,7 @@ class MainAgent:
         news_provider: NewsProvider,
         anthropic_client: anthropic.Anthropic,
         trace_store: TraceStore,
-        model: str = "claude-sonnet-4-6",
+        model: Optional[str] = None,
         hotlist_provider: Optional[object] = None,
         web_search: Optional[object] = None,
     ) -> None:
@@ -314,7 +436,7 @@ class MainAgent:
         self._news = news_provider
         self._client = anthropic_client
         self._trace_store = trace_store
-        self._model = model
+        self._model = model or settings.anthropic_model
         self._hotlist = hotlist_provider
         self._web_search = web_search
         self._executor: Optional[ToolExecutor] = None
@@ -326,7 +448,14 @@ class MainAgent:
         progress_cb: Optional[Callable[[str, str], None]] = None,
     ) -> SessionState:
         """主入口：一次 agentic loop，返回填充后的 SessionState。"""
-        return self._agentic_loop(state, progress_cb=progress_cb)
+        started = time.perf_counter()
+        usage_acc: dict[str, int] = {}
+        result = self._agentic_loop(
+            state,
+            progress_cb=progress_cb,
+            usage_acc=usage_acc,
+        )
+        return self._attach_usage_stats(result, started, usage_acc)
 
     # ── Agentic Loop ───────────────────────────────────────────────────────────
 
@@ -334,6 +463,7 @@ class MainAgent:
         self,
         state: SessionState,
         progress_cb: Optional[Callable[[str, str], None]] = None,
+        usage_acc: Optional[dict[str, int]] = None,
     ) -> SessionState:
         executor = ToolExecutor(
             market_data=self._market,
@@ -355,7 +485,7 @@ class MainAgent:
                 try:
                     response = self._client.messages.create(
                         model=self._model,
-                        max_tokens=1024,
+                        max_tokens=MAX_RESPONSE_TOKENS,
                         system=_SYSTEM_PROMPT,
                         tools=ALL_TOOLS,
                         tool_choice={"type": "any"},
@@ -374,6 +504,9 @@ class MainAgent:
             if response is None:
                 return self._degraded(state, "LLM 调用失败：重试耗尽")
 
+            if usage_acc is not None:
+                _record_response_usage(usage_acc, response)
+
             logger.debug(f"[MainAgent] iter={iteration} stop_reason={response.stop_reason}")
 
             tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
@@ -382,9 +515,32 @@ class MainAgent:
                 text = "".join(
                     b.text for b in response.content if hasattr(b, "text")
                 ).strip()
+                textual_tool = _parse_textual_tool_call(text)
+                if textual_tool:
+                    final_type, final_data = textual_tool
+                    logger.warning("LLM returned textual tool call; parsed as %s", final_type)
+                    if final_type == "commit_answer":
+                        return self._build_direct_answer_state(
+                            state, final_data, executor.fact_sources
+                        )
+                    if final_type == "commit_clarification":
+                        return self._build_clarification_state(state, final_data)
+                    if final_type == "commit_opinion":
+                        return self._build_opinion_state(
+                            state,
+                            final_data,
+                            list(self._resolved_cache.values()),
+                            executor.last_price,
+                            executor.fact_sources,
+                        )
+                if "<tool_call>" in text or "<function=" in text:
+                    logger.warning("LLM returned incomplete textual tool call")
+                    return self._degraded(state, "模型返回了未完成的工具调用，请重试")
                 if text:
                     logger.warning("LLM 无工具调用直接结束，提取文本作为回答")
-                    return self._build_direct_answer_state(state, {"text": text})
+                    return self._build_direct_answer_state(
+                        state, {"text": text}, executor.fact_sources
+                    )
                 logger.warning("LLM 无工具调用直接结束，降级")
                 return self._degraded(state, "分析未完成")
 
@@ -451,14 +607,20 @@ class MainAgent:
             messages.append({"role": "user", "content": tool_results})
 
             if final_type == "commit_answer":
-                return self._build_direct_answer_state(state, final_data)
+                return self._build_direct_answer_state(
+                    state, final_data, executor.fact_sources
+                )
 
             if final_type == "commit_clarification":
                 return self._build_clarification_state(state, final_data)
 
             if final_type == "commit_opinion":
                 return self._build_opinion_state(
-                    state, final_data, list(self._resolved_cache.values()), executor.last_price
+                    state,
+                    final_data,
+                    list(self._resolved_cache.values()),
+                    executor.last_price,
+                    executor.fact_sources,
                 )
 
         # 超过迭代次数，但已有价格数据 → 构造直接回答
@@ -471,7 +633,9 @@ class MainAgent:
             logger.warning(
                 f"MainAgent 超过迭代次数，用已有价格数据构造回答：{answer_text}"
             )
-            return self._build_direct_answer_state(state, {"text": answer_text})
+            return self._build_direct_answer_state(
+                state, {"text": answer_text}, executor.fact_sources
+            )
 
         logger.error(f"MainAgent 超过最大迭代次数 {MAX_ITERATIONS}")
         return self._degraded(state, f"超过最大迭代次数 {MAX_ITERATIONS}")
@@ -499,12 +663,17 @@ class MainAgent:
     # ── 状态构建 ───────────────────────────────────────────────────────────────
 
     def _build_direct_answer_state(
-        self, state: SessionState, data: dict
+        self,
+        state: SessionState,
+        data: dict,
+        fact_sources: Optional[list[dict]] = None,
     ) -> SessionState:
         text = data.get("text", "")
+        normalized_fact_sources = _normalize_fact_sources(fact_sources)
         state = state.model_copy(update={
             "stage": "answered",
             "direct_answer": text,
+            "fact_sources": normalized_fact_sources,
             "intent": "knowledge_question",
             "intent_confidence": 1.0,
         })
@@ -549,6 +718,7 @@ class MainAgent:
         opinion: dict,
         entities: list[StockIdentifier],
         last_price: Optional[float],
+        fact_sources: Optional[list[dict]] = None,
     ) -> SessionState:
         now = _now_iso()
         symbol = entities[0] if entities else None
@@ -557,17 +727,28 @@ class MainAgent:
 
         stance = opinion.get("stance", "neutral")
         confidence = opinion.get("confidence", "low")
-        current_price = last_price or 0.0
-        pt_low = opinion.get("price_target_low") or current_price
-        pt_high = opinion.get("price_target_high") or current_price
+        current_price = last_price if last_price and last_price > 0 else None
+        price_target_current = current_price or 0.0
+        pt_low = _optional_float(opinion.get("price_target_low"))
+        pt_high = _optional_float(opinion.get("price_target_high"))
         horizon = opinion.get("horizon_label", "1w")
         anchor_summary = opinion.get("anchor_summary", "")
+        thesis = opinion.get("thesis", "")
+        market_narrative = opinion.get("market_narrative") or thesis or "暂无市场叙事"
+        core_drivers = _ensure_string_list(opinion.get("core_drivers"))
+        key_risks = _ensure_string_list(opinion.get("key_risks"))
+        debate_points = _ensure_string_list(opinion.get("debate_points"))
+        watch_points = _ensure_string_list(opinion.get("watch_points"))
 
         price_target = PriceTarget(
-            current_price=current_price,
-            expected_price_low=float(pt_low),
-            expected_price_high=float(pt_high),
-            target_label=f"{pt_low:.2f}–{pt_high:.2f}" if pt_low != pt_high else f"{current_price:.2f}",
+            current_price=price_target_current,
+            expected_price_low=pt_low,
+            expected_price_high=pt_high,
+            target_label=(
+                f"{pt_low:.2f}–{pt_high:.2f}"
+                if pt_low is not None and pt_high is not None and pt_low != pt_high
+                else f"{price_target_current:.2f}"
+            ),
             horizon=horizon,
             stance=stance,
             generated_at=now,
@@ -581,12 +762,12 @@ class MainAgent:
         draft = StockResearchDraft(
             symbol=symbol_str,
             company_name=company_name,
-            market_narrative=opinion.get("market_narrative", ""),
-            thesis=opinion.get("thesis", ""),
-            core_drivers=opinion.get("core_drivers", []),
-            key_risks=opinion.get("key_risks", []),
-            debate_points=opinion.get("debate_points", []),
-            watch_points=opinion.get("watch_points", []),
+            market_narrative=market_narrative,
+            thesis=thesis,
+            core_drivers=core_drivers,
+            key_risks=key_risks,
+            debate_points=debate_points,
+            watch_points=watch_points,
             stance=stance,
             reasoning_window=AnalysisWindow(mode="auto", horizon_label=horizon),
             price_target=price_target,
@@ -608,13 +789,15 @@ class MainAgent:
             current_price=current_price,
             expected_price_text=(
                 f"目标区间 {pt_low:.2f}–{pt_high:.2f} 元（{horizon}）"
-                if pt_low != pt_high else f"参考价 {current_price:.2f} 元"
+                if pt_low is not None and pt_high is not None and pt_low != pt_high
+                else f"参考价 {current_price:.2f} 元" if current_price is not None
+                else "暂无行情数据"
             ),
             horizon_text=horizon,
-            market_narrative=opinion.get("market_narrative", ""),
-            core_drivers=opinion.get("core_drivers", []),
-            key_risks=opinion.get("key_risks", []),
-            watch_points=opinion.get("watch_points", []),
+            market_narrative=market_narrative,
+            core_drivers=core_drivers,
+            key_risks=key_risks,
+            watch_points=watch_points,
             generated_at=now,
         )
 
@@ -624,13 +807,15 @@ class MainAgent:
                 interpretation=ec.get("interpretation", ""),
                 direction=ec.get("direction", "mixed"),
             )
-            for ec in opinion.get("evidence_chain", [])[:5]
+            for ec in _ensure_dict_list(opinion.get("evidence_chain"))[:5]
             if isinstance(ec, dict)
         ]
+        normalized_fact_sources = _normalize_fact_sources(fact_sources)
         expanded = ExpandedOpinionCard(
             **card.model_dump(),
-            debate_points=opinion.get("debate_points", []),
+            debate_points=debate_points,
             evidence_chain=evidence_chain,
+            fact_sources=normalized_fact_sources,
             information_changes=[],
             anchor_summary=anchor_summary,
         )
@@ -646,7 +831,8 @@ class MainAgent:
             "intent_confidence": 0.8,
             "research_draft": draft,
             "evaluation": evaluation,
-            "output_draft": card,
+            "output_draft": expanded,
+            "fact_sources": normalized_fact_sources,
             "working_memory": working_memory,
             "stage": "completed",
         })
@@ -654,6 +840,45 @@ class MainAgent:
                                   f"{card.stance_label} | {card.one_liner}"))
         self._trace_store.append_many(state.trace)
         return state
+
+    def _attach_usage_stats(
+        self,
+        state: SessionState,
+        started: float,
+        usage_acc: dict[str, int],
+    ) -> SessionState:
+        elapsed_ms = max(0, int((time.perf_counter() - started) * 1000))
+        input_tokens = int(usage_acc.get("input_tokens", 0))
+        output_tokens = int(usage_acc.get("output_tokens", 0))
+        cache_creation = int(usage_acc.get("cache_creation_input_tokens", 0))
+        cache_read = int(usage_acc.get("cache_read_input_tokens", 0))
+        total_tokens = input_tokens + output_tokens + cache_creation + cache_read
+
+        input_rate = float(settings.llm_input_cost_per_1m_tokens or 0.0)
+        output_rate = float(settings.llm_output_cost_per_1m_tokens or 0.0)
+        cost_is_configured = input_rate > 0 or output_rate > 0
+        estimated_cost = None
+        if cost_is_configured:
+            billable_input_tokens = input_tokens + cache_creation + cache_read
+            estimated_cost = (
+                billable_input_tokens / 1_000_000 * input_rate
+                + output_tokens / 1_000_000 * output_rate
+            )
+
+        return state.model_copy(update={
+            "usage_stats": UsageStats(
+                elapsed_ms=elapsed_ms,
+                llm_calls=int(usage_acc.get("llm_calls", 0)),
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_input_tokens=cache_creation,
+                cache_read_input_tokens=cache_read,
+                total_tokens=total_tokens,
+                estimated_cost=estimated_cost,
+                cost_currency=settings.llm_cost_currency or "USD",
+                cost_is_configured=cost_is_configured,
+            )
+        })
 
     # ── 降级 ──────────────────────────────────────────────────────────────────
 

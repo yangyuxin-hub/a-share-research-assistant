@@ -9,6 +9,7 @@ from typing import Optional
 
 import anthropic
 
+from ashare_research_assistant.config.settings import settings
 from ashare_research_assistant.core.models import (
     AnchorBasis,
     DailyBar,
@@ -91,10 +92,10 @@ class PriceTargetEngine:
     def __init__(
         self,
         anthropic_client: anthropic.Anthropic,
-        model: str = "claude-haiku-4-5-20251001",
+        model: Optional[str] = None,
     ) -> None:
         self._client = anthropic_client
-        self._model = model
+        self._model = model or settings.anthropic_model
 
     def generate(
         self,

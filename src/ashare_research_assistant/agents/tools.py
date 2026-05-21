@@ -26,6 +26,63 @@ from ashare_research_assistant.providers.bundle import ProviderBundle
 logger = logging.getLogger(__name__)
 
 
+# ── 来源记录工具函数 ─────────────────────────────────────────────────────────
+
+def _record_fact_source(
+    ctx: dict,
+    *,
+    kind: str,
+    title: str,
+    source,
+    data_timestamp: Optional[str] = None,
+    published_at: Optional[str] = None,
+    url: Optional[str] = None,
+    document_id: Optional[str] = None,
+) -> None:
+    """把工具返回数据的来源写入请求上下文，供最终卡片做事实审查。"""
+    if not source:
+        return
+    item = {
+        "kind": kind,
+        "title": title,
+        "source_name": source.provider,
+        "endpoint": source.endpoint,
+        "reliability": source.reliability,
+        "fetched_at": source.fetched_at,
+        "data_timestamp": data_timestamp or source.data_timestamp,
+        "published_at": published_at,
+        "url": url,
+        "document_id": document_id,
+    }
+    sources = ctx.setdefault("fact_sources", [])
+    key = (
+        item["kind"],
+        item["title"],
+        item["source_name"],
+        item["endpoint"],
+        item["data_timestamp"],
+        item["published_at"],
+        item["url"],
+        item["document_id"],
+    )
+    existing = {
+        (
+            s.get("kind"),
+            s.get("title"),
+            s.get("source_name"),
+            s.get("endpoint"),
+            s.get("data_timestamp"),
+            s.get("published_at"),
+            s.get("url"),
+            s.get("document_id"),
+        )
+        for s in sources
+        if isinstance(s, dict)
+    }
+    if key not in existing:
+        sources.append(item)
+
+
 # ── 工具日期工具函数 ──────────────────────────────────────────────────────────
 
 def _date_range(days: int) -> tuple[str, str]:
@@ -293,6 +350,13 @@ def _handle_get_stock_profile(inp: dict, providers: ProviderBundle, ctx: dict) -
     if not profile:
         return f"未找到 {symbol} 的公司资料"
     si = profile.identifier
+    _record_fact_source(
+        ctx,
+        kind="company_profile",
+        title=f"公司资料：{si.name}（{si.symbol}）",
+        source=profile.source,
+        data_timestamp=profile.source.data_timestamp,
+    )
     lines = [f"## {si.name}（{si.symbol}）基础资料"]
     if si.industry:
         lines.append(f"行业：{si.industry}")
@@ -316,6 +380,13 @@ def _handle_get_price_snapshot(inp: dict, providers: ProviderBundle, ctx: dict) 
     if not snap:
         return f"无法获取 {symbol} 价格数据"
     ctx["last_price"] = snap.current_price  # 供 commit_opinion 读取
+    _record_fact_source(
+        ctx,
+        kind="price",
+        title=f"价格快照：{symbol}",
+        source=snap.source,
+        data_timestamp=snap.data_timestamp or snap.trade_date,
+    )
     lines = [f"## {symbol} 价格快照（{snap.trade_date}）"]
     lines.append(f"当前价：{snap.current_price:.2f}")
     if snap.prev_close:
@@ -338,6 +409,14 @@ def _handle_get_daily_bars(inp: dict, providers: ProviderBundle, ctx: dict) -> s
     bars = providers.market.get_daily_bars(symbol, start_date, end_date)
     if not bars:
         return f"{symbol} 区间 {start_date}~{end_date} 无日线数据"
+    latest_bar = bars[-1]
+    _record_fact_source(
+        ctx,
+        kind="daily_bar",
+        title=f"历史K线：{symbol}（{start_date}-{end_date}）",
+        source=latest_bar.source,
+        data_timestamp=latest_bar.trade_date,
+    )
     lines = [f"## {symbol} 近 {len(bars)} 交易日行情"]
     for b in bars[-15:]:
         pct = f"{b.pct_change:+.2f}%" if b.pct_change is not None else "N/A"
@@ -359,6 +438,13 @@ def _handle_get_financial_factors(inp: dict, providers: ProviderBundle, ctx: dic
     if not factors:
         return f"{symbol} 暂无估值因子数据"
     lf = factors[-1]
+    _record_fact_source(
+        ctx,
+        kind="factor",
+        title=f"估值因子：{symbol}",
+        source=lf.source,
+        data_timestamp=lf.trade_date,
+    )
     lines = [f"## {symbol} 最新估值因子（{lf.trade_date}）"]
     if lf.pe_ttm:
         lines.append(f"PE(TTM)：{lf.pe_ttm:.1f}")
@@ -391,6 +477,15 @@ def _handle_search_announcements(inp: dict, providers: ProviderBundle, ctx: dict
         return f"{symbol} 近 {days} 天无公告"
     lines = [f"## {symbol} 近期公告（{len(items)} 条）"]
     for ann in items:
+        _record_fact_source(
+            ctx,
+            kind="announcement",
+            title=ann.title,
+            source=ann.source,
+            published_at=ann.publish_time,
+            url=ann.url,
+            document_id=ann.id,
+        )
         lines.append(f"- [{ann.publish_time or ''}] {ann.title}")
         if ann.summary and ann.summary != ann.title:
             lines.append(f"  摘要：{ann.summary[:100]}")
@@ -416,6 +511,15 @@ def _handle_search_news(inp: dict, providers: ProviderBundle, ctx: dict) -> str:
         return f"{symbol} 近 {days} 天无相关新闻"
     lines = [f"## {symbol} 近期新闻（{len(items)} 条）"]
     for n in items:
+        _record_fact_source(
+            ctx,
+            kind="news",
+            title=n.title,
+            source=n.source,
+            published_at=n.publish_time,
+            url=n.url,
+            document_id=n.id,
+        )
         outlet = getattr(n, "outlet", "") or ""
         lines.append(f"- [{n.publish_time or ''}][{outlet}] {n.title}")
         if n.summary and n.summary != n.title:
@@ -437,6 +541,13 @@ def _handle_get_hot_list(inp: dict, providers: ProviderBundle, ctx: dict) -> str
             if items:
                 lines = [f"## 今日{list_type}榜（TOP {len(items)}）"]
                 for i, item in enumerate(items, 1):
+                    _record_fact_source(
+                        ctx,
+                        kind="hotspot",
+                        title=f"{item.name}（{item.symbol}）热榜",
+                        source=item.source,
+                        data_timestamp=item.source.data_timestamp,
+                    )
                     pct = item.momentum_score
                     pct_str = f"{pct:+.2f}%" if pct is not None else ""
                     lines.append(f"{i:2d}. {item.name}（{item.symbol}）{pct_str}")
@@ -483,6 +594,15 @@ def _handle_search_web(inp: dict, providers: ProviderBundle, ctx: dict) -> str:
         return f"未找到「{query}」相关实时资讯"
     lines = [f"## 实时资讯：{query}（{len(items)} 条）"]
     for n in items:
+        _record_fact_source(
+            ctx,
+            kind="web",
+            title=n.title,
+            source=n.source,
+            published_at=n.publish_time,
+            url=n.url,
+            document_id=n.id,
+        )
         outlet = n.outlet or ""
         lines.append(f"- [{n.publish_time or ''}][{outlet}] {n.title}")
         if n.summary and n.summary != n.title:
@@ -557,6 +677,11 @@ class ToolExecutor:
     def last_price(self) -> Optional[float]:
         """最后一次 get_price_snapshot 的价格，供 commit_opinion 使用。"""
         return self._ctx.get("last_price")
+
+    @property
+    def fact_sources(self) -> list[dict]:
+        """本轮工具调用采集到的数据/信息来源。"""
+        return list(self._ctx.get("fact_sources") or [])
 
     def execute(self, tool_name: str, tool_input: dict) -> str:
         """路由到 tool_registry，返回 LLM 可读字符串。"""

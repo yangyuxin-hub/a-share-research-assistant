@@ -8,6 +8,7 @@ from typing import Optional
 
 import anthropic
 
+from ashare_research_assistant.config.settings import settings
 from ashare_research_assistant.core.models import (
     AnalysisWindow,
     DailyBar,
@@ -95,11 +96,11 @@ class StockResearchAgent:
         self,
         anthropic_client: anthropic.Anthropic,
         price_target_engine: PriceTargetEngine,
-        model: str = "claude-sonnet-4-6",
+        model: Optional[str] = None,
     ) -> None:
         self._client = anthropic_client
         self._price_target_engine = price_target_engine
-        self._model = model
+        self._model = model or settings.anthropic_model
 
     def analyze(
         self,

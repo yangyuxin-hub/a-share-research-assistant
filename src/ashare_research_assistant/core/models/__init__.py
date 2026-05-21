@@ -16,13 +16,14 @@ from .research import AnalysisWindow, AnchorBasis, PriceTarget, StockResearchDra
 from .opinion import (
     EvaluationResult,
     OpinionCard,
+    FactSourceItem,
     EvidenceChainItem,
     InformationChangeItem,
     ExpandedOpinionCard,
 )
 from .trace import TraceEvent, SessionStage, TraceActor
 from .memory import UserMemoryProfile, WorkingMemory
-from .session import SessionState, RouterResult, IntentType
+from .session import SessionState, RouterResult, IntentType, UsageStats
 
 __all__ = [
     "SourceMeta", "StockIdentifier", "StockProfile", "PriceSnapshot",
@@ -31,9 +32,9 @@ __all__ = [
     "Citation", "EvidenceItem", "EvidenceBundle",
     "ClarificationOption", "ClarificationQuestion", "ClarificationState",
     "AnalysisWindow", "AnchorBasis", "PriceTarget", "StockResearchDraft",
-    "EvaluationResult", "OpinionCard", "EvidenceChainItem",
+    "EvaluationResult", "OpinionCard", "FactSourceItem", "EvidenceChainItem",
     "InformationChangeItem", "ExpandedOpinionCard",
     "TraceEvent", "SessionStage", "TraceActor",
     "UserMemoryProfile", "WorkingMemory",
-    "SessionState", "RouterResult", "IntentType",
+    "SessionState", "RouterResult", "IntentType", "UsageStats",
 ]

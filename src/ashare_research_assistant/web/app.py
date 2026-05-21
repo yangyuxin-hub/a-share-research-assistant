@@ -72,6 +72,7 @@ def _get_orchestrator() -> Orchestrator:
             anthropic_client=client,
             clarification_engine=ClarificationEngine(),
             trace_store=TraceStore(path=settings.trace_store_path),
+            model=settings.anthropic_model,
             web_search=container.web_search,
             hotlist_provider=container.hotlist,
         )
@@ -152,7 +153,10 @@ def build_demo() -> gr.Blocks:
             lower = message.strip().lower()
 
             if lower in ("退出", "exit", "quit"):
-                history.append({"role": "assistant", "content": "再见，欢迎随时回来。"})
+                history.append({
+                    "role": "assistant",
+                    "content": md_renderer.render_text_answer("再见，欢迎随时回来。"),
+                })
                 yield "", history, _new_session()
                 return
 
@@ -164,7 +168,10 @@ def build_demo() -> gr.Blocks:
                     "- 输入 `展开` 查看上一次分析的完整证据链\n"
                     "- 点击 **清空对话** 开始新会话"
                 )
-                history.append({"role": "assistant", "content": help_md})
+                history.append({
+                    "role": "assistant",
+                    "content": md_renderer.render_text_answer(help_md),
+                })
                 yield "", history, state
                 return
 

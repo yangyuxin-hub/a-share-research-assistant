@@ -3,6 +3,28 @@ from pydantic import BaseModel
 from .evidence import Citation
 
 
+class FactSourceItem(BaseModel):
+    kind: Literal[
+        "company_profile",
+        "price",
+        "daily_bar",
+        "factor",
+        "announcement",
+        "news",
+        "hotspot",
+        "web",
+    ]
+    title: str
+    source_name: str
+    endpoint: Optional[str] = None
+    reliability: Optional[Literal["official", "licensed", "aggregated", "scraped"]] = None
+    fetched_at: Optional[str] = None
+    data_timestamp: Optional[str] = None
+    published_at: Optional[str] = None
+    url: Optional[str] = None
+    document_id: Optional[str] = None
+
+
 class EvaluationResult(BaseModel):
     confidence: Literal["low", "medium", "high"]
     evidence_coverage: Literal["insufficient", "partial", "good"]
@@ -45,5 +67,6 @@ class InformationChangeItem(BaseModel):
 class ExpandedOpinionCard(OpinionCard):
     debate_points: list[str] = []
     evidence_chain: list[EvidenceChainItem] = []
+    fact_sources: list[FactSourceItem] = []
     information_changes: list[InformationChangeItem] = []
     anchor_summary: str = ""

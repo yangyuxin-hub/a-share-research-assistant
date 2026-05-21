@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 _TOOL_LABEL: dict[str, str] = {
     "resolve_stock":         "解析股票",
+    "resolve_stock_result":  "解析结果",
     "commit_intent":         "确认意图",
     "get_stock_profile":     "基本面",
     "get_price_snapshot":    "价格快照",
@@ -78,6 +79,7 @@ def _get_orchestrator() -> Orchestrator:
             anthropic_client=client,
             clarification_engine=ClarificationEngine(),
             trace_store=TraceStore(path=settings.trace_store_path),
+            model=settings.anthropic_model,
             web_search=WebSearchProvider(),
             hotlist_provider=AKShareHotlistProvider(),
         )
@@ -135,12 +137,12 @@ async def _stream(
     # ── 内置命令（立即返回）────────────────────────────────────────────────
     if lower in ("退出", "exit", "quit"):
         _sessions[session_id] = SessionState(created_at=_now_iso(), updated_at=_now_iso())
-        yield sse({"type": "result", "content": "再见，欢迎随时回来。"})
+        yield sse({"type": "result", "content": md_renderer.render_text_answer("再见，欢迎随时回来。")})
         yield "data: [DONE]\n\n"
         return
 
     if lower in ("帮助", "help"):
-        yield sse({"type": "result", "content": (
+        yield sse({"type": "result", "content": md_renderer.render_text_answer(
             "**使用说明**\n\n"
             "- 输入股票代码（如 `600519`）或名称（如 `贵州茅台`）开始分析\n"
             "- 输入自然语言问题（如 `AI 板块怎么样`）\n"

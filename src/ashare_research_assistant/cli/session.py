@@ -75,6 +75,7 @@ class CLISession:
             anthropic_client=self._anthropic,
             clarification_engine=self._clarification_engine,
             trace_store=self._trace_store,
+            model=settings.anthropic_model,
             web_search=self._web_search,
             hotlist_provider=self._hotlist,
         )

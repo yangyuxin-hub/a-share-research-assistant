@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_base_url: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
+    llm_input_cost_per_1m_tokens: float = 0.0
+    llm_output_cost_per_1m_tokens: float = 0.0
+    llm_cost_currency: str = "USD"
 
     # ChatGPT Codex（通过 ChatGPT Plus/Pro OAuth 订阅使用）
     codex_model: str = "codex-mini-latest"

@@ -6,7 +6,7 @@ from .provider import StockIdentifier
 from .evidence import EvidenceBundle
 from .clarification import ClarificationState
 from .research import AnalysisWindow, StockResearchDraft
-from .opinion import EvaluationResult, OpinionCard
+from .opinion import EvaluationResult, FactSourceItem, OpinionCard
 from .trace import TraceEvent, SessionStage
 from .memory import WorkingMemory, UserMemoryProfile
 
@@ -31,6 +31,19 @@ class RouterResult(BaseModel):
     clarification_reason: Optional[str] = None
 
 
+class UsageStats(BaseModel):
+    elapsed_ms: int = 0
+    llm_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    total_tokens: int = 0
+    estimated_cost: Optional[float] = None
+    cost_currency: str = "USD"
+    cost_is_configured: bool = False
+
+
 class SessionState(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     turn_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -51,6 +64,8 @@ class SessionState(BaseModel):
     evaluation: Optional[EvaluationResult] = None
     output_draft: Optional[OpinionCard] = None
     direct_answer: Optional[str] = None  # 纯知识问答的原始回复文本
+    fact_sources: list[FactSourceItem] = []
+    usage_stats: Optional[UsageStats] = None
     conversation_history: list[dict] = []  # [{"role": "user"|"assistant", "content": str}]
     working_memory: WorkingMemory = Field(default_factory=WorkingMemory)
     user_memory_snapshot: Optional[UserMemoryProfile] = None
@@ -82,6 +97,8 @@ class SessionState(BaseModel):
                 "updated_at": now,
                 "conversation_history": history,
                 "direct_answer": None,
+                "fact_sources": [],
+                "usage_stats": None,
                 "output_draft": None,
                 "research_draft": None,
                 "evaluation": None,

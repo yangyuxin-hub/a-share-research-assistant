@@ -97,6 +97,16 @@ def check() -> None:
     console.print(f"  TUSHARE_TOKEN:     {'[green]OK 已配置[/green]' if settings.tushare_token else '[red]NO 未配置[/red]'}")
     console.print(f"  APP_ENV:           {settings.app_env}")
     console.print(f"  MODEL:             {settings.anthropic_model}")
+    cost_configured = (
+        settings.llm_input_cost_per_1m_tokens > 0
+        or settings.llm_output_cost_per_1m_tokens > 0
+    )
+    cost_status = (
+        f"{settings.llm_input_cost_per_1m_tokens:g}/{settings.llm_output_cost_per_1m_tokens:g} "
+        f"{settings.llm_cost_currency}/1M tokens"
+        if cost_configured else "未配置"
+    )
+    console.print(f"  LLM_COST:          {cost_status}")
     console.print()
 
     # 测试 Tushare 连接

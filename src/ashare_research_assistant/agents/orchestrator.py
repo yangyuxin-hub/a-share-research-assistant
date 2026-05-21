@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from ashare_research_assistant.agents.main_agent import MainAgent
+from ashare_research_assistant.config.settings import settings
 from ashare_research_assistant.core.models import ClarificationState, RouterResult, SessionState
 from ashare_research_assistant.providers.base import (
     AnnouncementProvider,
@@ -36,7 +37,7 @@ class Orchestrator:
         anthropic_client: anthropic.Anthropic,
         clarification_engine: ClarificationEngine,
         trace_store: TraceStore,
-        model: str = "claude-sonnet-4-6",
+        model: Optional[str] = None,
         hotlist_provider: Optional[object] = None,
         web_search: Optional[object] = None,
     ) -> None:
@@ -47,7 +48,7 @@ class Orchestrator:
             news_provider=news_provider,
             anthropic_client=anthropic_client,
             trace_store=trace_store,
-            model=model,
+            model=model or settings.anthropic_model,
             hotlist_provider=hotlist_provider,
             web_search=web_search,
         )
