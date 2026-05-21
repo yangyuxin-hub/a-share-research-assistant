@@ -35,6 +35,15 @@ cloudflared tunnel --url http://localhost:7860 --protocol http2
 
 ---
 
+## 输出特性
+
+- **结构化观点卡**：判断 / 立场 / 置信度 / 价位 / 核心驱动 / 风险 / 证据链，支持「展开」二级视图
+- **直答排版规范**：知识/概念类问题用引用块强调结论、术语加粗、列表化呈现，避免段落堆叠
+- **事实审查依据**：每条结论附带来源、数据日期、可靠性标签（官方/授权/聚合/采集），底部虚化展示
+- **耗时与成本**：每次回答末尾显示 LLM 调用次数、token 用量（含缓存读写）、估算成本（需配置单价）
+
+---
+
 ## 配置
 
 | 变量 | 说明 | 必需 |
@@ -43,6 +52,9 @@ cloudflared tunnel --url http://localhost:7860 --protocol http2
 | `ANTHROPIC_BASE_URL` | 中转代理地址 | 可选 |
 | `ANTHROPIC_MODEL` | 模型，默认 `claude-sonnet-4-6` | 可选 |
 | `TUSHARE_TOKEN` | Tushare token（建议 ≥2000 积分） | 推荐 |
+| `LLM_INPUT_COST_PER_1M_TOKENS` | 输入 token 单价（每 100 万），用于估算单次回答成本 | 可选 |
+| `LLM_OUTPUT_COST_PER_1M_TOKENS` | 输出 token 单价（每 100 万） | 可选 |
+| `LLM_COST_CURRENCY` | 成本币种，默认 `USD` | 可选 |
 
 ---
 
