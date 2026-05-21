@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     llm_output_cost_per_1m_tokens: float = 0.0
     llm_cached_input_cost_per_1m_tokens: float = 0.0
     llm_cost_currency: str = "USD"
+    enable_thinking: bool = False
+    thinking_budget_tokens: int = 2000
 
     # ChatGPT Codex（通过 ChatGPT Plus/Pro OAuth 订阅使用）
     codex_model: str = "codex-mini-latest"

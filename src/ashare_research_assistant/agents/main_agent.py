@@ -494,11 +494,15 @@ class MainAgent:
         messages.append({"role": "user", "content": user_input})
         system_prompt = _build_system_prompt()
 
+        # 扩展思考开关。运行时检测：若网关不支持 thinking 参数，第一次失败后回退。
+        thinking_enabled = bool(settings.enable_thinking)
+        thinking_budget = max(1024, int(settings.thinking_budget_tokens or 2000))
+
         for iteration in range(MAX_ITERATIONS):
             response = None
             for attempt in range(3):
                 try:
-                    response = self._client.messages.create(
+                    create_kwargs = dict(
                         model=self._model,
                         max_tokens=MAX_RESPONSE_TOKENS,
                         system=system_prompt,
@@ -506,9 +510,23 @@ class MainAgent:
                         tool_choice={"type": "any"},
                         messages=messages,
                     )
+                    if thinking_enabled:
+                        create_kwargs["thinking"] = {
+                            "type": "enabled",
+                            "budget_tokens": thinking_budget,
+                        }
+                        # Anthropic 要求开启 thinking 时 temperature=1，且 max_tokens > budget
+                        create_kwargs["temperature"] = 1
+                        create_kwargs["max_tokens"] = max(MAX_RESPONSE_TOKENS, thinking_budget + 1024)
+                    response = self._client.messages.create(**create_kwargs)
                     break
                 except Exception as e:
-                    is_overloaded = "overloaded" in str(e).lower() or "503" in str(e)
+                    msg = str(e).lower()
+                    if thinking_enabled and ("thinking" in msg or "unsupported" in msg or "invalid_request" in msg):
+                        logger.warning("网关不支持 thinking 参数，本次会话回退到普通模式：%s", e)
+                        thinking_enabled = False
+                        continue
+                    is_overloaded = "overloaded" in msg or "503" in msg
                     if is_overloaded and attempt < 2:
                         wait = 2 ** attempt * 3  # 3s, 6s
                         logger.warning(f"API 过载，{wait}s 后重试 (iter={iteration}, attempt={attempt+1}): {e}")
@@ -518,6 +536,14 @@ class MainAgent:
                         return self._degraded(state, f"LLM 调用失败：{e}")
             if response is None:
                 return self._degraded(state, "LLM 调用失败：重试耗尽")
+
+            # 提取 thinking 块，通过 progress_cb 流式展示
+            if progress_cb:
+                for b in response.content:
+                    if getattr(b, "type", None) == "thinking":
+                        snippet = (getattr(b, "thinking", "") or "").strip()
+                        if snippet:
+                            progress_cb("_thinking", snippet[:160].replace("\n", " "))
 
             if usage_acc is not None:
                 _record_response_usage(usage_acc, response)

@@ -16,6 +16,7 @@ _RELIABILITY_LABEL = {
     "scraped": "采集",
 }
 _TOOL_LABEL: dict[str, str] = {
+    "_thinking":            "💭 思考",
     "resolve_stock":        "解析股票",
     "resolve_stock_result": "解析结果",
     "commit_intent":        "确认意图",

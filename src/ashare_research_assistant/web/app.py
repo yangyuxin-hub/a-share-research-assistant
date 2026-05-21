@@ -26,6 +26,7 @@ from ashare_research_assistant.web import md_renderer
 logger = logging.getLogger(__name__)
 
 _TOOL_LABEL: dict[str, str] = {
+    "_thinking":            "💭 思考",
     "resolve_stock":        "解析股票",
     "commit_intent":        "确认意图",
     "get_stock_profile":    "基本面",
