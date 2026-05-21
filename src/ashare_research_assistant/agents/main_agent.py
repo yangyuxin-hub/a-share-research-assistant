@@ -871,12 +871,17 @@ class MainAgent:
 
         input_rate = float(settings.llm_input_cost_per_1m_tokens or 0.0)
         output_rate = float(settings.llm_output_cost_per_1m_tokens or 0.0)
+        cached_input_rate = float(settings.llm_cached_input_cost_per_1m_tokens or 0.0)
+        # 未配置命中价时，按未命中价计；与旧行为兼容
+        effective_cached_rate = cached_input_rate if cached_input_rate > 0 else input_rate
         cost_is_configured = input_rate > 0 or output_rate > 0
         estimated_cost = None
         if cost_is_configured:
-            billable_input_tokens = input_tokens + cache_creation + cache_read
+            # cache_read = 命中缓存；input + cache_creation = 未命中（含一次性写入）
+            uncached_input_tokens = input_tokens + cache_creation
             estimated_cost = (
-                billable_input_tokens / 1_000_000 * input_rate
+                uncached_input_tokens / 1_000_000 * input_rate
+                + cache_read / 1_000_000 * effective_cached_rate
                 + output_tokens / 1_000_000 * output_rate
             )
 

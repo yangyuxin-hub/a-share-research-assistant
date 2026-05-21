@@ -52,9 +52,10 @@ cloudflared tunnel --url http://localhost:7860 --protocol http2
 | `ANTHROPIC_BASE_URL` | 中转代理地址 | 可选 |
 | `ANTHROPIC_MODEL` | 模型，默认 `claude-sonnet-4-6` | 可选 |
 | `TUSHARE_TOKEN` | Tushare token（建议 ≥2000 积分） | 推荐 |
-| `LLM_INPUT_COST_PER_1M_TOKENS` | 输入 token 单价（每 100 万），用于估算单次回答成本 | 可选 |
+| `LLM_INPUT_COST_PER_1M_TOKENS` | 输入 token 单价（每 100 万，缓存未命中含一次性写入） | 可选 |
+| `LLM_CACHED_INPUT_COST_PER_1M_TOKENS` | 输入 token 缓存命中单价（每 100 万） | 可选 |
 | `LLM_OUTPUT_COST_PER_1M_TOKENS` | 输出 token 单价（每 100 万） | 可选 |
-| `LLM_COST_CURRENCY` | 成本币种，默认 `USD` | 可选 |
+| `LLM_COST_CURRENCY` | 成本币种，默认 `USD`，支持 `CNY` 显示 ¥ | 可选 |
 
 ---
 

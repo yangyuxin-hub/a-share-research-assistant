@@ -77,8 +77,10 @@ def _render_usage_stats(stats) -> list[str]:
         token_parts.append(f"缓存读取 {stats.cache_read_input_tokens:,}")
 
     if stats.cost_is_configured and stats.estimated_cost is not None:
-        currency_symbol = "$" if stats.cost_currency.upper() == "USD" else f"{stats.cost_currency} "
-        cost_text = f"{currency_symbol}{stats.estimated_cost:.6f}"
+        ccy = stats.cost_currency.upper()
+        symbol_map = {"USD": "$", "CNY": "¥", "RMB": "¥", "EUR": "€", "GBP": "£", "JPY": "¥"}
+        currency_symbol = symbol_map.get(ccy, f"{stats.cost_currency} ")
+        cost_text = f"{currency_symbol}{stats.estimated_cost:.4f}"
     else:
         cost_text = "未配置单价"
 
